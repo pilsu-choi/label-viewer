@@ -1,33 +1,8 @@
-import { el, clear, mount, charDiff, statusLabel, fmtPct } from './util.js';
-
-const STATUS_CLASS = { MATCH: 'badge-ok', MISMATCH: 'badge-bad', MISSING: 'badge-warn', EXTRA: 'badge-extra', TYPE_MISMATCH: 'badge-type' };
-const STATUS_COLOR = { MATCH: 'var(--ok)', MISMATCH: 'var(--bad)', MISSING: 'var(--warn)', EXTRA: 'var(--extra)', TYPE_MISMATCH: 'var(--type)' };
-
-function statusBadge(status) {
-  if (!status) return el('span', { class: 'badge badge-muted' }, '—');
-  return el('span', { class: `badge ${STATUS_CLASS[status] || 'badge-muted'}` }, statusLabel(status));
-}
+import { el, clear, mount, charDiff, fmtPct, statusBadge, scoreCard } from './util.js';
 
 function diffSpan(goldenVal, val) {
   const parts = charDiff(goldenVal, val);
   return el('span', { class: 'cmp-val' }, parts.map((p) => p.changed ? el('span', { class: 'diff-add' }, p.text) : document.createTextNode(p.text)));
-}
-
-function scoreCard(title, score) {
-  const card = el('div', { class: 'score-card' });
-  if (!score) { mount(card, [el('div', { class: 'sc-head' }, [el('span', { class: 'sc-name' }, title), el('span', { class: 'sc-acc' }, '—')])]); return card; }
-  const total = score.total || 0;
-  const bar = el('div', { class: 'score-bar' });
-  for (const k of ['MATCH', 'MISMATCH', 'MISSING', 'EXTRA', 'TYPE_MISMATCH']) {
-    const n = score[k] || 0; if (!n) continue;
-    bar.appendChild(el('span', { style: `width:${(n / total) * 100}%;background:${STATUS_COLOR[k]}`, title: `${statusLabel(k)} ${n}` }));
-  }
-  mount(card, [
-    el('div', { class: 'sc-head' }, [el('span', { class: 'sc-name' }, title), el('span', { class: 'sc-acc' }, fmtPct(score.accuracy))]),
-    bar,
-    el('div', { class: 'hint' }, ['MATCH', 'MISMATCH', 'MISSING', 'EXTRA', 'TYPE_MISMATCH'].map((k) => `${statusLabel(k)} ${score[k] || 0}`).join(' · ')),
-  ]);
-  return card;
 }
 
 function evidencePopover(x, y, entry) {
@@ -97,7 +72,7 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
     const list = doc.compare || [];
     const c = counts(list);
     const toolbar = el('div', { class: 'cmp-toolbar' }, [
-      ...[['all', '전체', list.length], ['mismatch', 'Mismatch', c.mismatch], ['missing', 'Missing', c.missing], ['extra', 'Extra', c.extra]]
+      ...[['all', '전체', list.length], ['mismatch', '불일치', c.mismatch], ['missing', '누락', c.missing], ['extra', '추가', c.extra]]
         .map(([key, label, n]) => el('button', { class: `chip ${state.filter === key ? 'active' : ''}`, onclick: () => { state.filter = key; draw(); } }, [label, el('span', { class: 'n' }, String(n))])),
     ]);
     const scoreCards = el('div', { class: 'cmp-score-cards' }, [scoreCard('AO Extract', doc.score && doc.score.ao), scoreCard('Harness', doc.score && doc.score.harness)]);
@@ -117,10 +92,11 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
       const tbody = el('tbody');
       for (const [gk, rows] of groups) {
         const [area, container] = gk.split('::');
-        const label = area === 'field' ? '필드' : area === 'group' ? `그룹 · ${container}` : `표 · ${container}`;
-        tbody.appendChild(el('tr', {}, el('td', { colspan: '5', class: 'cmp-container' }, label)));
+        const kind = { field: '필드', group: '그룹', table: '표' }[area];
+        tbody.appendChild(el('tr', { class: 'cmp-group' }, el('td', { colspan: '5' }, [el('span', { class: 'kind' }, kind), container || null])));
         for (const e of rows) {
-          const tr = el('tr', { dataset: { path: e.path },
+          const off = [e.ao_status, e.harness_status].some((st) => st && st !== 'MATCH');
+          const tr = el('tr', { class: off ? 'is-off' : '', dataset: { path: e.path },
             onmouseenter: (ev) => {
               if (e.bbox && onHoverBbox) onHoverBbox(e.bbox);
               popEl = evidencePopover(ev.clientX, ev.clientY, e);
@@ -131,18 +107,18 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
           }, [
             el('td', {}, [e.area === 'table' ? el('span', { class: 'cmp-row' }, typeof e.row === 'number' ? `#${e.row + 1}` : `#${Number(String(e.row).slice(1)) + 1} 추가`) : null, el('span', { class: 'cmp-key' }, e.key)]),
             el('td', {}, el('span', { class: 'cmp-val' }, e.golden == null ? '—' : String(e.golden))),
-            el('td', {}, [diffSpan(e.golden, e.ao), ' ', statusBadge(e.ao_status)]),
-            el('td', {}, [diffSpan(e.golden, e.harness), ' ', statusBadge(e.harness_status)]),
+            el('td', {}, el('div', { class: 'cmp-cell' }, [diffSpan(e.golden, e.ao), statusBadge(e.ao_status)])),
+            el('td', {}, el('div', { class: 'cmp-cell' }, [diffSpan(e.golden, e.harness), statusBadge(e.harness_status)])),
             el('td', { class: 'cmp-adopt' }, [
-              onAdopt && e.ao != null && e.ao !== '' && el('button', { class: 'btn btn-sm', title: 'AO 값 채택', onclick: () => onAdopt(e, e.ao) }, 'AO'),
-              onAdopt && e.harness != null && e.harness !== '' && el('button', { class: 'btn btn-sm', title: 'Harness 값 채택', onclick: () => onAdopt(e, e.harness) }, 'H'),
+              onAdopt && e.ao != null && e.ao !== '' && el('button', { class: 'btn btn-sm', title: 'AO 값을 정답으로', onclick: () => onAdopt(e, e.ao) }, 'AO 채택'),
+              onAdopt && e.harness != null && e.harness !== '' && el('button', { class: 'btn btn-sm', title: 'Harness 값을 정답으로', onclick: () => onAdopt(e, e.harness) }, 'H 채택'),
             ]),
           ]);
           tbody.appendChild(tr);
         }
       }
       tableWrap.appendChild(el('table', { class: 'cmp-table' }, [
-        el('thead', {}, el('tr', {}, ['Key', 'Golden', 'AO', 'Harness', ''].map((h) => el('th', {}, h)))),
+        el('thead', {}, el('tr', {}, ['항목', 'Golden', 'AO', 'Harness', ''].map((h) => el('th', {}, h)))),
         tbody,
       ]));
     }
