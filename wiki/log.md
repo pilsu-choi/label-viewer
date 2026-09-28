@@ -15,3 +15,8 @@ status: active
 ### Creation
 
 - [AO–Harness Golden Set 검수 Viewer](2026-09-28-golden-set-viewer.md): 작업 공간 루트 wiki 문서를 저장소로 복사.
+- [번들 기반 Golden Set 관리 Web App](2026-09-28-bundle-golden-viewer.md): PRD 기반 새 앱 구현 기록.
+
+### Update
+
+- [AO–Harness Golden Set 검수 Viewer](2026-09-28-golden-set-viewer.md): 새 앱으로 대체되어 `status: deprecated` 로 표시.
