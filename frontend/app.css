@@ -319,7 +319,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .empty-state { padding: 56px 20px; text-align: center; color: var(--ink-3); }
 
 /* ---------- 화면 2: 상세 ---------- */
-.detail-screen { flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100vh; background: var(--surface); }
+.detail-screen { flex: 0 0 100vh; display: flex; flex-direction: column; min-height: 0; height: 100vh; overflow: hidden; background: var(--surface); }
 .detail-topbar { gap: 10px; }
 .nav-group { display: flex; gap: 4px; }
 .save-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
@@ -540,7 +540,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   .recent-item .cnt:nth-of-type(3), .recent-item .cnt:nth-of-type(4) { display: none; }
 }
 @media (max-width: 860px) {
-  .detail-screen { height: auto; }
+  .detail-screen { flex-basis: auto; height: auto; overflow: visible; }
   .detail-main { flex-direction: column; }
   .doc-rail { width: 100%; min-width: 0; max-height: 220px; border-right: 0; border-bottom: 1px solid var(--line); }
   .doc-rail-resizer { display: none; }
