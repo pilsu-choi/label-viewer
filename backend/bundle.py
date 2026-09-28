@@ -15,6 +15,7 @@ from typing import Any, BinaryIO
 from PIL import Image, ImageSequence
 
 from .compare import compare_bundle, harness_value, score
+from .doctype import DOC_TYPES, apply_template, canon, classified
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 JSON_KINDS = ("ao_extract", "harness", "golden", "ao_ui")
@@ -341,6 +342,21 @@ def doc_type_mismatch(harness: dict | None) -> dict | None:
     return None
 
 
+def _classification(parsed: dict) -> dict:
+    """Golden 대비 AO/Harness 문서 분류 일치 여부(True/False/None)."""
+    return {"ao": classified(parsed["golden"], parsed["ao_extract"]),
+            "harness": classified(parsed["golden"], parsed["harness"])}
+
+
+def _doc_type_suggest(parsed: dict) -> str:
+    """Golden 생성 기본 문서 종류: 하네스 재분류 제목 → AO → 하네스."""
+    mm = doc_type_mismatch(parsed["harness"])
+    for v in (mm and mm["title"], _doc_type_of(parsed["ao_extract"]), _doc_type_of(parsed["harness"])):
+        if canon(v):
+            return canon(v)
+    return ""
+
+
 def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     _safe_id(doc_id, "doc_id")
     bdir = bundle_dir(data_dir, bundle_id)
@@ -376,6 +392,9 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
         "review": (state.get("review") or {}).get(doc_id, ""),
         "doc_type": _doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"]),
         "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
+        "doc_type_suggest": _doc_type_suggest(parsed),
+        "doc_types": DOC_TYPES,
+        "classification": _classification(parsed),
         "pages": {
             "original": page_count(paths["original"]) if paths["original"] else 0,
             "preprocessed": page_count(paths["preprocessed"]) if paths["preprocessed"] else 0,
@@ -398,6 +417,7 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
     docs = []
     agg = {"ao": {"MATCH": 0, "MISMATCH": 0, "MISSING": 0, "EXTRA": 0, "TYPE_MISMATCH": 0, "total": 0},
            "harness": {"MATCH": 0, "MISMATCH": 0, "MISSING": 0, "EXTRA": 0, "TYPE_MISMATCH": 0, "total": 0}}
+    cls_sum = {"ao": [0, 0], "harness": [0, 0]}  # [정답 수, 판정 문서 수]
     n_golden = n_reviewed = n_missing = n_error = 0
     for doc_id in doc_ids(bdir):
         paths = {k: find_kind_file(bdir, k, doc_id) for k in DOC_KINDS}
@@ -415,8 +435,12 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
         rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"], parsed["ao_ui"]) if parsed["golden"] else []
         sc = {"ao": score(rows, "ao") if parsed["golden"] else None,
               "harness": score(rows, "harness") if parsed["golden"] else None}
+        cls = _classification(parsed)
         for side in ("ao", "harness"):
-            if sc[side]:
+            if cls[side] is not None:
+                cls_sum[side][0] += cls[side]
+                cls_sum[side][1] += 1
+            if sc[side] and cls[side] is not False:
                 for k in ("MATCH", "MISMATCH", "MISSING", "EXTRA", "TYPE_MISMATCH", "total"):
                     agg[side][k] += sc[side][k]
         rv = review.get(doc_id, "")
@@ -433,7 +457,7 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
             "id": doc_id, "has": has, "errors": errors, "review": rv,
             "doc_type": _doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"]),
             "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
-            "score": sc, "mismatch": mismatch,
+            "classification": cls, "score": sc, "mismatch": mismatch,
         })
 
     def _finish(a: dict) -> dict | None:
@@ -449,6 +473,8 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
             "docs": total_docs, "golden": n_golden, "reviewed": n_reviewed,
             "pending": total_docs - n_reviewed, "missing": n_missing, "error": n_error,
             "score": {"ao": _finish(agg["ao"]), "harness": _finish(agg["harness"])},
+            "classification": {s: {"correct": c, "total": t, "accuracy": round(c / t, 4)} if t else None
+                               for s, (c, t) in cls_sum.items()},
         },
     }
 
@@ -535,7 +561,7 @@ def golden_path(bdir: Path, doc_id: str) -> Path:
     return bdir / "golden" / f"{doc_id}.json"
 
 
-def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str) -> dict:
+def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_type: str | None = None) -> dict:
     bdir = bundle_dir(data_dir, bundle_id)
     gpath = golden_path(bdir, doc_id)
     if gpath.exists():
@@ -556,6 +582,13 @@ def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str) -> d
         data = _from_harness(hdata)
     else:
         raise ApiError(422, f"invalid source: {source}")
+    name = canon(doc_type)
+    if name:
+        docs = data.setdefault("documents", [copy.deepcopy(EMPTY_GOLDEN["documents"][0])])
+        if canon(docs[0].get("doc_type")) != name:
+            docs[0] = apply_template(docs[0], name)
+        else:
+            docs[0]["doc_type"] = name
     _atomic_write_json(gpath, data)
     return doc_detail(data_dir, bundle_id, doc_id)
 

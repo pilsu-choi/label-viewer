@@ -1,6 +1,13 @@
-import { el, mount, clear, fmtPct, scoreCard, icon, menuButton, mismatchBadge } from './util.js';
+import { el, mount, clear, fmtPct, scoreCard, icon, menuButton, mismatchBadge, classBadges } from './util.js';
 import { api } from './api.js';
 import { navigate } from './router.js';
+
+// 점수 카드 아래 분류 채점 요약과 필드 집계 제외 안내.
+function classLine(cls) {
+  if (!cls) return null;
+  const ex = cls.total - cls.correct;
+  return el('div', { class: 'hint' }, [`분류 ${cls.correct}/${cls.total} (${fmtPct(cls.accuracy)})`, ex ? ` · 분류 오답 ${ex}건은 필드 집계 제외` : '']);
+}
 
 function docBadges(has) {
   const order = [['original', '원본', '원'], ['preprocessed', '전처리', '전'], ['ao_extract', 'AO 결과', 'AO'], ['harness', 'Harness 결과', 'H'], ['golden', 'Golden', 'G']];
@@ -128,10 +135,10 @@ export function renderList(root, bundleId) {
         el('div', { class: 'ov-stats' }, [stat(summary.golden, 'Golden 있음'), stat(summary.missing, '데이터 누락'), stat(summary.error, '오류')]),
       ]),
       el('div', { class: 'ov-scores' }, [
-        scoreCard('AO Extract', sc.ao),
+        el('div', {}, [scoreCard('AO Extract', sc.ao), classLine(summary.classification.ao)]),
         el('div', { class: `ov-delta ${delta == null ? '' : delta >= 0 ? 'up' : 'down'}` }, delta == null ? '—'
           : [el('b', {}, `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}p`), el('span', {}, 'Harness 보정')]),
-        scoreCard('Harness', sc.harness),
+        el('div', {}, [scoreCard('Harness', sc.harness), classLine(summary.classification.harness)]),
       ]),
     ]);
 
@@ -157,6 +164,7 @@ export function renderList(root, bundleId) {
               el('div', { class: 'doc-info-head' }, [el('span', { class: 'doc-id' }, d.id), reviewBadge(d.review)]),
               el('div', { class: 'doc-type' }, d.doc_type || '문서 유형 없음'),
               mismatchBadge(d.doc_type_mismatch),
+              classBadges(d.classification),
               docBadges(d.has),
               d.errors && d.errors.length ? el('span', { class: 'badge badge-bad', title: d.errors.join('\n') }, `오류 ${d.errors.length}`) : null,
               accBars(d.score),
@@ -170,6 +178,7 @@ export function renderList(root, bundleId) {
           docBadges(d.has),
           el('span', { class: 'doc-type' }, d.doc_type || '—'),
           mismatchBadge(d.doc_type_mismatch),
+          classBadges(d.classification),
           reviewBadge(d.review),
         ]))));
       }

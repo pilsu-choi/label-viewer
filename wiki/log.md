@@ -13,6 +13,10 @@ status: active
 
 ## 2026-09-29
 
+### Update
+
+- [Label Viewer 양식 불일치 표시와 문서 분류 판정 검토](2026-09-29-doc-type-mismatch.md): 검수자 문서 종류 확정·7종 양식 템플릿, 분류 채점과 오분류 필드 집계 제외 구현 내용 추가.
+
 ### Creation
 
 - [Label Viewer 양식 불일치 표시와 문서 분류 판정 검토](2026-09-29-doc-type-mismatch.md): Harness 재분류 기반 양식 불일치 배지, AO 기반 Golden 생성 경고, AO JSON만으로 분류 판정 가능성 검증(e2e 205건)과 후속 제안 기록.

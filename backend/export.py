@@ -32,6 +32,9 @@ def export_golden_zip(data_dir: Path, bundle_id: str) -> bytes:
     return buf.getvalue()
 
 
+_OX = {True: "O", False: "X", None: ""}
+
+
 def _cell_val(v) -> str:
     return "" if v is None else str(v)
 
@@ -43,7 +46,7 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
     wb = Workbook()
     ws_summary = wb.active
     ws_summary.title = "요약"
-    ws_summary.append(["id", "doc_type", "검수상태",
+    ws_summary.append(["id", "doc_type", "AO 분류", "H 분류", "검수상태",
                         "AO MATCH", "AO MISMATCH", "AO MISSING", "AO EXTRA", "AO TYPE_MISMATCH", "AO 정확도",
                         "H MATCH", "H MISMATCH", "H MISSING", "H EXTRA", "H TYPE_MISMATCH", "H 정확도"])
     for c in ws_summary[1]:
@@ -67,14 +70,15 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
     for did in doc_ids:
         detail = B.doc_detail(data_dir, bundle_id, did)
         ao_sc, h_sc = detail["score"]["ao"], detail["score"]["harness"]
-        row = [did, detail["doc_type"], detail["review"] or "",
+        cls = detail["classification"]
+        row = [did, detail["doc_type"], *(_OX[cls[k]] for k in ("ao", "harness")), detail["review"] or "",
                *(ao_sc.get(k) if ao_sc else "" for k in ("MATCH", "MISMATCH", "MISSING", "EXTRA", "TYPE_MISMATCH")),
                ao_sc.get("accuracy") if ao_sc else "",
                *(h_sc.get(k) if h_sc else "" for k in ("MATCH", "MISMATCH", "MISSING", "EXTRA", "TYPE_MISMATCH")),
                h_sc.get("accuracy") if h_sc else ""]
         ws_summary.append(row)
-        for side, sc in (("ao", ao_sc), ("h", h_sc)):
-            if sc:
+        for side, sc, ok in (("ao", ao_sc, cls["ao"]), ("h", h_sc, cls["harness"])):
+            if sc and ok is not False:
                 for k in ("MATCH", "MISMATCH", "MISSING", "EXTRA", "TYPE_MISMATCH"):
                     totals[side][k] += sc[k]
 
@@ -110,7 +114,7 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
         t = sum(total.values())
         return round(n_match / t, 4) if t else ""
 
-    ws_summary.append(["합계", "", "",
+    ws_summary.append(["합계", "", "", "", "",
                         totals["ao"]["MATCH"], totals["ao"]["MISMATCH"], totals["ao"]["MISSING"],
                         totals["ao"]["EXTRA"], totals["ao"]["TYPE_MISMATCH"], _acc(totals["ao"]["MATCH"], totals["ao"]),
                         totals["h"]["MATCH"], totals["h"]["MISMATCH"], totals["h"]["MISSING"],

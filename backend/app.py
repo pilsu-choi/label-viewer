@@ -79,7 +79,7 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     @app.post("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def post_golden(bundle_id: str, doc_id: str, request: Request):
         body = await request.json()
-        return call(B.create_golden, data_dir, bundle_id, doc_id, body.get("from", "empty"))
+        return call(B.create_golden, data_dir, bundle_id, doc_id, body.get("from", "empty"), body.get("doc_type"))
 
     @app.put("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def put_golden(bundle_id: str, doc_id: str, request: Request):

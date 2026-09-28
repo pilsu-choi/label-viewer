@@ -1,4 +1,4 @@
-import { el, clear, mount, toast, isEditingTarget, isMismatch, icon, menuButton, mismatchBadge } from './util.js';
+import { el, clear, mount, toast, isEditingTarget, isMismatch, icon, menuButton, mismatchBadge, classBadges } from './util.js';
 import { api } from './api.js';
 import { navigate, setNavGuard } from './router.js';
 import { createImageViewer } from './imageViewer.js';
@@ -244,7 +244,7 @@ export function renderDetail(root, bundleId, docId) {
         el('button', { class: 'btn ghost icon', disabled: !doc.prev, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.prev)}`), title: '이전 문서 (←)', 'aria-label': '이전 문서' }, icon('chevron-left')),
         el('button', { class: 'btn ghost icon', disabled: !doc.next, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.next)}`), title: '다음 문서 (→)', 'aria-label': '다음 문서' }, icon('chevron-right')),
       ]),
-      el('div', { class: 'title' }, [doc.id, doc.golden && doc.golden.documents && doc.golden.documents[0] && doc.golden.documents[0].doc_type ? el('small', {}, doc.golden.documents[0].doc_type) : null, mismatchBadge(doc.doc_type_mismatch)]),
+      el('div', { class: 'title' }, [doc.id, doc.golden && doc.golden.documents && doc.golden.documents[0] && doc.golden.documents[0].doc_type ? el('small', {}, doc.golden.documents[0].doc_type) : null, mismatchBadge(doc.doc_type_mismatch), classBadges(doc.classification)]),
       el('div', { class: 'grow' }),
       saveStateEl,
       el('button', { class: 'btn primary sm', title: 'Ctrl+S', onclick: () => editor && editor.save() }, '저장'),

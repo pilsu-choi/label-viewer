@@ -1,15 +1,15 @@
 ---
 okf_version: "0.2"
 type: implementation
-title: Label Viewer 양식 불일치 표시와 문서 분류 판정 검토
-description: Harness 재분류 결과로 AO 오분류(양식 불일치)를 표시하고 AO 기반 Golden 생성 시 경고하는 기능, AO JSON만으로 분류를 판정할 수 있는지 e2e 205건으로 검증한 결과와 후속 제안
-tags: [label-viewer, doc-type, reclassification, golden, harness, grading]
+title: Label Viewer 양식 불일치 표시·문서 종류 확정·분류 채점
+description: Harness 재분류 기반 양식 불일치 표시, 검수자 문서 종류 확정과 7종 양식 템플릿, 분류 채점과 오분류 필드 집계 제외, AO JSON만으로 분류를 판정할 수 있는지 e2e 205건 검증 결과
+tags: [label-viewer, doc-type, reclassification, golden, harness, grading, template]
 status: active
 ---
 
 날짜: 2026-09-29
-브랜치: `feat/doc-type-mismatch`
-워크트리: `label_veiwer/.worktrees/doc-type-mismatch`
+브랜치: `feat/doc-type-mismatch`, `feat/doc-type-grading`
+워크트리: `label_veiwer/.worktrees/doc-type-mismatch`, `label_veiwer/.worktrees/doc-type-grading`
 
 ## 배경
 
@@ -40,8 +40,25 @@ e2e `표본결과` 7종 중 AO 결과가 있는 205건. 폴더명을 정답 분�
 
 결론: AO JSON만으로는 분류 정답 여부를 판정할 수 없다. 이미지나 사람처럼 AO와 독립된 근거가 필요하다.
 
-## 후속 제안 (미구현)
+## 문서 종류 확정과 분류 채점 (`feat/doc-type-grading`)
 
-1. Golden 생성 시 검수자가 문서 종류(7종)를 확정한다. 기본값은 AO 분류이고, 다르게 고르면 e2e 정답지 키로 만든 해당 양식의 빈 템플릿으로 뼈대를 바꾼다.
-2. 채점에서 분류를 먼저 본다. Golden `doc_type`과 AO `doc_type`(코드→이름 매핑)을 비교해 분류 정오를 따로 집계하고, 오분류 문서는 필드 채점에서 제외하거나 별도로 집계한다.
-3. 올바른 양식의 Golden이 있으면 Golden–AO 키 겹침률을 보조 지표로 쓴다. 이때는 순환 문제가 없다.
+검증 결과에 따라 분류 판정은 Harness 재분류와 검수자 확정에 맡기고, 키 템플릿은 양식 교체용으로만 쓴다.
+
+| 위치 | 내용 |
+|---|---|
+| `backend/doctype.py` | 표준 7종 `DOC_TYPES`, AO 코드·표기 별칭(`약제영수증`→`약제비영수증`, `입원확인서`→`입퇴원확인서` 등)을 표준명으로 바꾸는 `canon()`, `classified()`, `apply_template()` |
+| `scripts/make_doc_templates.py` → `backend/doc_templates.json` | e2e 정답지 210건에서 종류별로 50% 이상 나오는 필드·그룹·표 머리글로 빈 양식 생성 |
+| `create_golden(..., doc_type)` | 고른 종류가 소스의 종류와 다르면 템플릿 뼈대로 바꾸고 같은 key 값(표는 같은 표의 행)을 옮긴다. 같으면 이름만 표준화 |
+| Golden 생성 카드 | "문서 종류" 선택. 기본값은 Harness 재분류 제목 → AO → Harness 순(`doc_type_suggest`) |
+| Golden 편집 | 문서 유형 입력칸을 7종 select로 교체(이름만 바꾸고 템플릿은 바꾸지 않음) |
+| 분류 채점 | `classification = {ao, harness}`: Golden `doc_type`과 각 소스 `doc_type`의 표준명 일치 여부(모르면 None). 번들 요약에 분류 정확도, 분류 오답 문서는 해당 소스 필드 집계와 Excel 합계에서 제외. 문서별 점수는 그대로 |
+| 화면·Excel | 목록 점수 카드 아래 "분류 n/m", 목록·상세에 "AO 분류 오답"/"H 분류 오답" 배지, Excel 요약에 `AO 분류`·`H 분류`(O/X) 열 |
+
+참고: 진단서·입퇴원확인서·소견서는 정답지 스키마가 같아 템플릿도 같다. 이 셋 사이의 오분류(예: 소견서→진단서)는 템플릿 교체로는 달라지지 않고 분류 채점으로만 드러난다.
+
+dummy2 확인: D2-DET-001은 기본 종류가 세부내역서로 잡히고, AO로 생성하면 세부내역서 템플릿이 되며 `classification.ao = False`로 AO 필드 집계에서 빠진다.
+
+## 남은 과제
+
+- Harness 재분류가 제목을 못 읽은 오분류(`kept`)는 검수자가 문서 종류를 고쳐야 드러난다.
+- 올바른 양식의 Golden이 있을 때 Golden–AO 키 겹침률 보조 지표는 아직 넣지 않았다.
