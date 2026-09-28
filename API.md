@@ -113,11 +113,13 @@ storage/bundles/{bundle_id}/
    "review":"done|progress|",
    "doc_type":"진료비영수증",
    "score":{"ao":{"MATCH":10,"MISMATCH":1,"MISSING":0,"EXTRA":0,"TYPE_MISMATCH":0,"total":11,"accuracy":0.909},
-            "harness":{...}}}],
+            "harness":{...}},
+   "mismatch":1}],
  "summary":{"docs":0,"golden":0,"reviewed":0,"pending":0,"missing":0,"error":0,
             "score":{"ao":{...},"harness":{...}}}}
 ```
 - `score` 는 golden 이 있고 대상 JSON 이 있을 때만 계산, 없으면 해당 키 null.
+- `mismatch` = compare 행 중 `ao_status` 또는 `harness_status` 가 `MATCH` 가 아닌(빈 문자열 제외) 행 수. 상세 화면의 비교 탭 배지·`M` 이동과 같은 기준.
 - `missing` = original·ao_extract·harness·golden 중 하나라도 없는 문서 수. `error` = errors 가 있는 문서 수.
 - docs 는 id 오름차순(자연 정렬).
 

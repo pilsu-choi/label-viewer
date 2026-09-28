@@ -8,6 +8,7 @@ export function el(tag, attrs = {}, children = []) {
     else if (k === 'dataset') Object.assign(node.dataset, v);
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
     else if (k === 'text') node.textContent = v;
+    else if (k === 'value') node.value = v; // setAttribute('value') 는 textarea 에 반영되지 않음
     else if (v === true) node.setAttribute(k, '');
     else node.setAttribute(k, v);
   }
@@ -91,6 +92,14 @@ export function looksLikeMarkup(s) {
   return typeof s === 'string' && /<\s*\/?\s*[a-zA-Z][^>]*>/.test(s);
 }
 
+// 한글 단어 끝 받침 유무로 조사를 고른다. 예: josa('필드', '이', '가') → '가'
+export function josa(word, withBatchim, withoutBatchim) {
+  const ch = String(word || '').trim().slice(-1);
+  const code = ch.charCodeAt(0) - 0xac00;
+  const hasBatchim = code >= 0 && code <= 11171 && code % 28 !== 0;
+  return hasBatchim ? withBatchim : withoutBatchim;
+}
+
 export function statusLabel(status) {
   return { MATCH: '일치', MISMATCH: '불일치', MISSING: '누락', EXTRA: '추가', TYPE_MISMATCH: '형식오류' }[status] || status || '';
 }
@@ -133,6 +142,12 @@ export function charDiff(golden, other) {
     else cur.text += ch;
   }
   return out.length ? out : [{ text: '', changed: false }];
+}
+
+// compare 엔트리가 AO·Harness 중 하나라도 MATCH 가 아니면 불일치로 본다.
+export function isMismatch(entry) {
+  if (!entry) return false;
+  return (entry.ao_status && entry.ao_status !== 'MATCH') || (entry.harness_status && entry.harness_status !== 'MATCH');
 }
 
 export function pathKey(docIdx, area, container, key) {

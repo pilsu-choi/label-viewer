@@ -1,4 +1,4 @@
-import { el, clear, mount, toast, isEditingTarget, icon, menuButton } from './util.js';
+import { el, clear, mount, toast, isEditingTarget, isMismatch, icon, menuButton } from './util.js';
 import { api } from './api.js';
 import { navigate, setNavGuard } from './router.js';
 import { createImageViewer } from './imageViewer.js';
@@ -17,9 +17,14 @@ function writeFocusMode(mode) { try { localStorage.setItem('lv.bboxMode', mode);
 
 function readFlag(key) { try { return localStorage.getItem(key) === '1'; } catch { return false; } }
 function writeFlag(key, val) { try { localStorage.setItem(key, val ? '1' : '0'); } catch {} }
+const RECON_HEIGHT_DEFAULT = 220;
+function readReconHeight() {
+  try { const n = Number(localStorage.getItem('lv.reconHeight')); return n >= 90 ? n : RECON_HEIGHT_DEFAULT; } catch { return RECON_HEIGHT_DEFAULT; }
+}
+function writeReconHeight(h) { try { localStorage.setItem('lv.reconHeight', String(Math.round(h))); } catch {} }
 
 export function renderDetail(root, bundleId, docId) {
-  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), railCollapsed: readFlag('lv.railCollapsed'), panelCollapsed: readFlag('lv.panelCollapsed') };
+  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), railCollapsed: readFlag('lv.railCollapsed'), panelCollapsed: readFlag('lv.panelCollapsed'), reconCollapsed: readFlag('lv.reconCollapsed') };
   let doc = null, bundle = null, editor = null, compareApi = null, imgViewer = null, documentRail = null;
   let saveStateEl, reviewInput, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
   let leftPanel, rightPanel, closeExportMenus, dragCleanup;
@@ -50,7 +55,7 @@ export function renderDetail(root, bundleId, docId) {
     else if (e.key === 'ArrowRight') { if (doc.next) navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.next)}`); }
     else if (e.key === '+') { editor && editor.addField(); }
     else if (e.key === 'Delete') { editor && editor.deleteFocused(); }
-    else if (e.key === 'm' || e.key === 'M') { jumpNextMismatch(); }
+    else if (e.key === 'm' || e.key === 'M') { jumpNextMismatch(e.shiftKey ? -1 : 1); }
     else if (e.key === 'o' || e.key === 'O') { toggleView(); }
     else if (e.key === 'z' || e.key === 'Z') { setFocusMode(state.focusMode === 'zoom' ? 'locate' : 'zoom'); }
     else if (e.key === '1') { setReconSource('golden'); }
@@ -61,10 +66,12 @@ export function renderDetail(root, bundleId, docId) {
     else if (e.key === '?') { openHelp(); }
   }
 
-  function jumpNextMismatch() {
-    const entries = (doc.compare || []).filter((e) => (e.ao_status && e.ao_status !== 'MATCH') || (e.harness_status && e.harness_status !== 'MATCH'));
+  // 편집 탭이면 편집기 안에서 이동(입력칸 포커스 유지), 그 외 탭이면 비교 탭으로 전환해 강조한다.
+  function jumpNextMismatch(dir = 1) {
+    if (state.tab === 'edit') { editor && editor.focusMismatch(dir); return; }
+    const entries = (doc.compare || []).filter(isMismatch);
     if (!entries.length) { toast('불일치 항목이 없습니다.'); return; }
-    state.mismatchCursor = (state.mismatchCursor + 1) % entries.length;
+    state.mismatchCursor = (state.mismatchCursor + dir + entries.length) % entries.length;
     setTab('compare');
     compareApi && compareApi.flashPath(entries[state.mismatchCursor].path);
   }
@@ -126,7 +133,7 @@ export function renderDetail(root, bundleId, docId) {
   function openHelp() {
     if (helpOverlay) return;
     const rows = [['← / →', '이전 / 다음 문서'], ['Ctrl+S', '저장'], ['+', '필드 추가'], ['Delete', '필드 삭제'],
-      ['M', '다음 불일치'], ['O', '원본/전처리 전환'], ['Z', 'bbox hover 확대/위치표시 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'],
+      ['M / Shift+M', '다음 / 이전 불일치 (편집 탭에서는 편집기 안에서 이동)'], ['O', '원본/전처리 전환'], ['Z', 'bbox hover 확대/위치표시 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'],
       ['[', '문서 목록 접기/펼치기'], [']', '검수 패널 접기/펼치기'], ['?', '도움말']];
     helpOverlay = el('div', { class: 'help-overlay', onclick: (e) => { if (e.target === helpOverlay) closeHelp(); } },
       el('div', { class: 'help-card' }, [
@@ -197,7 +204,7 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function updateTabCounts() {
-    const mismatchCount = (doc.compare || []).filter((e) => (e.ao_status && e.ao_status !== 'MATCH') || (e.harness_status && e.harness_status !== 'MATCH')).length;
+    const mismatchCount = (doc.compare || []).filter(isMismatch).length;
     const btn = tabButtons.compare;
     if (btn) { clear(btn); btn.appendChild(document.createTextNode('비교')); if (mismatchCount) btn.appendChild(el('span', { class: 'count' }, String(mismatchCount))); }
   }
@@ -311,7 +318,7 @@ export function renderDetail(root, bundleId, docId) {
 
     buildRawTab();
 
-    const vsplit = el('div', { class: 'splitter v' });
+    const vsplit = el('div', { class: 'splitter v', style: state.reconCollapsed ? 'display:none' : '' });
     reconBody = el('div', { class: 'recon-body' });
     reconSourceButtons.golden = el('button', { class: 'active', onclick: () => setReconSource('golden') }, 'Golden');
     reconSourceButtons.ao = el('button', { onclick: () => setReconSource('ao'), disabled: !doc.has.ao_extract }, 'AO');
@@ -320,18 +327,32 @@ export function renderDetail(root, bundleId, docId) {
       html: el('button', { class: 'active', onclick: () => { state.reconRenderer = 'html'; rendererButtons.html.classList.add('active'); rendererButtons.md.classList.remove('active'); drawRecon(); } }, 'HTML'),
       md: el('button', { onclick: () => { state.reconRenderer = 'md'; rendererButtons.md.classList.add('active'); rendererButtons.html.classList.remove('active'); drawRecon(); } }, 'Markdown'),
     };
-    const reconPanel = el('div', { class: 'recon-panel', style: 'height:280px' }, [
+    const reconCollapseBtn = el('button', {
+      class: 'btn ghost icon sm', title: state.reconCollapsed ? '펼치기' : '접기', 'aria-label': '재구성 패널 접기/펼치기',
+      onclick: toggleReconCollapse,
+    }, icon(state.reconCollapsed ? 'chevron-right' : 'chevron-down'));
+    const reconPanel = el('div', { class: `recon-panel ${state.reconCollapsed ? 'collapsed' : ''}`, style: state.reconCollapsed ? '' : `height:${readReconHeight()}px` }, [
       el('div', { class: 'panel-head recon-toolbar' }, [
+        reconCollapseBtn,
         el('span', { class: 'label' }, '재구성 보기'),
         el('div', { class: 'seg' }, [reconSourceButtons.golden, reconSourceButtons.ao, reconSourceButtons.harness]),
         el('div', { class: 'seg' }, [rendererButtons.html, rendererButtons.md]),
       ]),
       reconBody,
     ]);
+    function toggleReconCollapse() {
+      state.reconCollapsed = !state.reconCollapsed;
+      writeFlag('lv.reconCollapsed', state.reconCollapsed);
+      reconPanel.classList.toggle('collapsed', state.reconCollapsed);
+      reconPanel.style.height = state.reconCollapsed ? '' : `${readReconHeight()}px`;
+      vsplit.style.display = state.reconCollapsed ? 'none' : '';
+      reconCollapseBtn.title = state.reconCollapsed ? '펼치기' : '접기';
+      clear(reconCollapseBtn); reconCollapseBtn.appendChild(icon(state.reconCollapsed ? 'chevron-right' : 'chevron-down'));
+    }
 
     let dragging = false, startY = 0, startH = 0;
     const onVMove = (e) => { if (!dragging) return; const h = Math.min(Math.max(90, startH - (e.clientY - startY)), rightPanel.clientHeight - 120); reconPanel.style.height = `${h}px`; };
-    const onVUp = () => { dragging = false; vsplit.classList.remove('active'); };
+    const onVUp = () => { if (dragging) writeReconHeight(reconPanel.getBoundingClientRect().height); dragging = false; vsplit.classList.remove('active'); };
     vsplit.addEventListener('mousedown', (e) => { e.preventDefault(); dragging = true; startY = e.clientY; startH = reconPanel.getBoundingClientRect().height; vsplit.classList.add('active'); });
     window.addEventListener('mousemove', onVMove);
     window.addEventListener('mouseup', onVUp);

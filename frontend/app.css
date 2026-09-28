@@ -459,6 +459,8 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .tab-panel-host { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 0; padding: var(--sp-3); background: var(--surface); }
 
 .recon-panel { flex: none; display: flex; flex-direction: column; min-height: 90px; background: var(--surface); }
+.recon-panel.collapsed { min-height: 0; height: auto !important; }
+.recon-panel.collapsed .recon-body { display: none; }
 .recon-toolbar { gap: var(--sp-3); }
 .recon-toolbar .label { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2); }
 .recon-body { flex: 1; overflow: auto; padding: var(--sp-3); }
@@ -478,6 +480,7 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 /* 자동 저장 서브툴바 */
 .gs-subtoolbar { display: flex; align-items: center; gap: var(--sp-3); height: 36px; margin-bottom: var(--sp-2); border-bottom: 1px solid var(--line); }
 .gs-subtoolbar .hint { font-size: var(--fs-xs); }
+.gs-summary { white-space: nowrap; }
 .export-pop button.danger { color: var(--bad); }
 
 .section-block { margin-top: var(--sp-6); padding-top: var(--sp-4); border-top: 1px solid var(--line); container-type: inline-size; }
@@ -496,7 +499,7 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .gs-grid-wrap { border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; background: var(--surface); }
 .gs-grid-head, .field-row {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr) 1fr 1fr 84px var(--h-sm);
+  grid-template-columns: 160px minmax(0, 1fr) 1fr 1fr 64px var(--h-sm);
   grid-template-areas: "label value ao harness dtype del";
   align-items: center; column-gap: var(--sp-1);
 }
@@ -507,20 +510,36 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 
 .field-row { position: relative; padding: 2px var(--sp-1); border-radius: var(--r-sm); }
 .field-row:hover { background: var(--surface-2); }
-.field-row.mismatch::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--bad); z-index: 1; }
+.field-row.mismatch::before, .field-row.warn::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--bad); z-index: 1; }
+.field-row.warn::before { background: var(--warn); }
+.field-row.flash { background: var(--hl-soft); transition: background .6s; }
 .field-row input[type="text"] { width: 100%; height: var(--h-sm); border-color: transparent; background: transparent; font-size: var(--fs-md); }
+.field-row .cell-wrap input[type="text"] { border-color: var(--line); }
 .field-row input[type="text"]:hover { border-color: var(--line); background: var(--surface); }
 .field-row input[type="text"]:focus { border-color: var(--accent); background: var(--surface); }
 .fr-label { grid-area: label; }
 input.fr-label { color: var(--ink-2); font-weight: 600; background: var(--surface-2) !important; border-radius: var(--r-sm); }
-input.fr-label:hover, input.fr-label:focus { background: var(--surface) !important; }
+input.fr-label[readonly] { cursor: default; }
+input.fr-label:not([readonly]):hover, input.fr-label:not([readonly]):focus { background: var(--surface) !important; }
+input.fr-label[readonly]:hover { border-color: transparent; }
+.field-row .cell-wrap input[type="text"]:placeholder-shown { border-style: dashed; border-color: var(--line-strong); }
 .fr-value { grid-area: value; position: relative; }
-.fr-dtype { grid-area: dtype; height: var(--h-sm); border-color: transparent; background-color: transparent; color: var(--ink-3); font-size: var(--fs-sm); }
+.fr-dtype { grid-area: dtype; }
+/* 타입: 평소엔 작은 텍스트 배지, 행 hover/focus 시에만 select 테두리·화살표 */
+select.fr-dtype {
+  width: 100%; height: var(--h-sm); padding: 0 2px; border: 1px solid transparent; border-radius: var(--r-sm);
+  appearance: none; background-color: transparent; background-image: none; color: var(--ink-3); font-size: var(--fs-xs);
+}
+.field-row:hover select.fr-dtype, .field-row:focus-within select.fr-dtype {
+  padding-right: 20px; border-color: var(--line); background-color: var(--surface); color: var(--ink-2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b8b94' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 3px center; background-size: 14px;
+}
 .fr-del { grid-area: del; }
 .fr-compare { display: contents; }
 .fr-ao { grid-area: ao; } .fr-harness { grid-area: harness; }
 .fr-ao, .fr-harness { min-width: 0; padding: 0 var(--sp-1); border-radius: var(--r-sm); }
-.fr-ao.is-off, .fr-harness.is-off { background: var(--bad-soft); }
+.fr-ao.is-off, .fr-harness.is-off { background: color-mix(in srgb, var(--bad-soft) 55%, transparent); }
 .fr-dash { display: block; padding: 1px var(--sp-1); color: var(--ink-3); font-size: var(--fs-sm); }
 .field-row-del {
   display: grid; place-items: center; width: var(--h-sm); height: var(--h-sm); border: 0; border-radius: var(--r-sm);
@@ -534,7 +553,8 @@ input.fr-label:hover, input.fr-label:focus { background: var(--surface) !importa
 .gs-chip { display: flex; width: 100%; flex-direction: column; align-items: flex-start; gap: 0; min-width: 0; height: var(--h-sm); padding: 1px var(--sp-1); border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; justify-content: center; }
 .gs-chip:hover:not(:disabled) { background: var(--surface-2); }
 .gs-chip:disabled { cursor: default; opacity: .55; }
-.gs-chip .cap { display: none; flex: none; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.gs-chip .cap { display: none; flex: none; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
+.gs-chip:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--accent); }
 .gs-chip .val { min-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .gs-chip .stat { display: none; flex: none; color: var(--ink-3); font-size: var(--fs-xs); }
 .gs-chip.is-off .val { color: var(--bad); }
@@ -555,8 +575,9 @@ input.fr-label:hover, input.fr-label:focus { background: var(--surface) !importa
 .group-head { display: flex; align-items: center; gap: var(--sp-1); height: 36px; padding: 0 var(--sp-2); background: var(--surface-2); border-bottom: 1px solid var(--line); }
 .group-head .chev { display: grid; place-items: center; width: var(--h-sm); height: var(--h-sm); border: 0; padding: 0; border-radius: var(--r-sm); background: transparent; color: var(--ink-3); }
 .group-head .chev:hover { background: var(--surface); }
-.group-head input[type="text"] { flex: 1; height: var(--h-sm); border-color: transparent; background: transparent; font-size: var(--fs-md); font-weight: 600; }
-.group-head input[type="text"]:hover, .group-head input[type="text"]:focus { border-color: var(--line-strong); background: var(--surface); }
+.group-head input[type="text"] { flex: 1; height: var(--h-sm); border-color: transparent; background: transparent; color: var(--ink); font-size: var(--fs-md); font-weight: 700; }
+.group-head input[type="text"][readonly] { cursor: default; }
+.group-head input[type="text"]:not([readonly]):hover, .group-head input[type="text"]:not([readonly]):focus { border-color: var(--line-strong); background: var(--surface); }
 .group-count { flex: none; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
 .group-fields { padding: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-2); }
 .group-fields.collapsed { display: none; }
@@ -565,23 +586,37 @@ input.fr-label:hover, input.fr-label:focus { background: var(--surface) !importa
 .table-block { padding: var(--sp-3) 0; border-top: 1px solid var(--line); }
 .table-head-row { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .table-head-row input { flex: 1; height: var(--h-sm); font-size: var(--fs-md); font-weight: 600; }
-.gs-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); }
-.gs-table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+/* 셀 채택 바: 표 블록당 하나, 포커스된 셀의 AO/Harness 칩을 보여준다(.gs-chip 재사용) */
+.table-adopt-bar { align-items: center; gap: var(--sp-3); height: 32px; padding: 0 var(--sp-2); margin-bottom: var(--sp-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); font-size: var(--fs-sm); }
+.table-adopt-bar .adopt-label { flex: none; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+.table-adopt-bar .fr-ao, .table-adopt-bar .fr-harness { flex: 1 1 0; min-width: 0; }
+.table-adopt-bar .gs-chip { flex-direction: row; align-items: baseline; gap: 6px; height: auto; }
+.table-adopt-bar .gs-chip .cap, .table-adopt-bar .gs-chip .stat { display: inline; }
+.gs-table-wrap { overflow: auto; max-height: min(60vh, 480px); border: 1px solid var(--line); border-radius: var(--r-md); }
+.gs-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
 .gs-table th, .gs-table td { padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); }
-.gs-table tr > :last-child { border-right: 0; }
+.gs-table tr > :last-child { border-right: 0; min-width: 32px; }
 .gs-table tbody tr:last-child td { border-bottom: 0; }
 .gs-table tbody tr:hover td { background: var(--surface-2); }
-.gs-table th { background: var(--surface-2); font-size: var(--fs-xs); }
+.gs-table thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); font-size: var(--fs-xs); }
 .gs-table th input[type="text"] { font-weight: 600; color: var(--ink-2); }
+/* 행번호 열 고정(가로 스크롤 시), 머리글 고정(세로 스크롤 시) — 왼쪽 위 모서리 셀은 z-index 로 둘 다 위에 */
+.gs-table td.rowhandle, .gs-table th.rowhandle { position: sticky; left: 0; z-index: 1; }
+.gs-table thead th.rowhandle { z-index: 3; }
+/* 불일치/빈 값 셀 배경 — 필드 행과 같은 색 체계(--bad-soft/--warn-soft). hover 배경보다 뒤에 두어 우선한다 */
+.gs-table tbody tr td.mismatch { background: var(--bad-soft); }
+.gs-table tbody tr td.warn { background: var(--warn-soft); }
+.gs-table tbody tr td.flash { background: var(--hl-soft); transition: background .6s; }
 .gs-col-head { position: relative; display: flex; align-items: center; }
-.gs-col-head input[type="text"] { padding-right: 23px; }
+.gs-col-head:hover input[type="text"], .gs-col-head:focus-within input[type="text"] { padding-right: 23px; }
 .gs-col-delete { position: absolute; right: 2px; top: 50%; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; transform: translateY(-50%); border: 0; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-3); opacity: 0; cursor: pointer; transition: opacity .12s, color .12s, background .12s; }
 .gs-col-head:hover .gs-col-delete, .gs-col-head:focus-within .gs-col-delete, .gs-col-delete:focus-visible { opacity: 1; }
 .gs-col-delete:hover { background: var(--bad-soft); color: var(--bad); }
 .badge[title], .sc-legend [title], .cmp-toolbar [title] { cursor: help; }
-.gs-table input[type="text"] { width: 100%; height: var(--h-md); border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+/* 열 폭: 내용 크기만큼(최소 72 / 최대 220px) — 헤더·값 입력 모두에 적용되어 열 폭을 정한다 */
+.gs-table input[type="text"] { width: auto; min-width: 72px; max-width: 220px; field-sizing: content; height: var(--h-md); border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .gs-table input[type="text"]:focus { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
-.gs-table td.rowhandle, .gs-table th.rowhandle { width: 32px; text-align: center; color: var(--ink-3); background: var(--surface-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.gs-table td.rowhandle, .gs-table th.rowhandle { width: 32px; min-width: 32px; text-align: center; color: var(--ink-3); background: var(--surface-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .gs-table-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 
 .advanced-json textarea { width: 100%; min-height: 300px; }
