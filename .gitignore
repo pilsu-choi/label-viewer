@@ -5,3 +5,5 @@ __pycache__/
 samples/
 storage/
 *.egg-info/
+deploy/aws/.env.aws
+deploy/aws/.tunnel.pid
