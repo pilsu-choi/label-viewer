@@ -312,8 +312,9 @@ export function renderDetail(root, bundleId, docId) {
     });
 
     compareApi = renderCompare(tabHosts.compare, doc, {
-      onAdopt: (entry, value) => editor.adoptValue(entry, value),
+      onAdopt: (entry, value) => { editor.adoptValue(entry, value); compareApi.markAdopted(entry.path, value); },
       onHoverBbox,
+      onGoToEdit: () => setTab('edit'),
     });
 
     buildRawTab();

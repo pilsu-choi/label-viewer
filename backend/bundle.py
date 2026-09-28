@@ -356,7 +356,8 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     if ao_ui_err:
         errors.append(f"ao_ui: {ao_ui_err}")
 
-    rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"], parsed["ao_ui"])
+    golden_doc = parsed["golden"]
+    rows = compare_bundle(golden_doc, parsed["ao_extract"], parsed["harness"], parsed["ao_ui"]) if golden_doc else []
     ids_sorted = ids
     idx = ids_sorted.index(doc_id)
     return {
@@ -371,7 +372,8 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
         },
         "golden": parsed["golden"], "ao": parsed["ao_extract"], "harness": parsed["harness"],
         "compare": rows,
-        "score": {"ao": score(rows, "ao"), "harness": score(rows, "harness")},
+        "score": {"ao": score(rows, "ao") if golden_doc else None,
+                  "harness": score(rows, "harness") if golden_doc else None},
         "prev": ids_sorted[idx - 1] if idx > 0 else None,
         "next": ids_sorted[idx + 1] if idx < len(ids_sorted) - 1 else None,
     }

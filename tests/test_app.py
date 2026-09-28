@@ -158,6 +158,15 @@ def test_compare_statuses(client: TestClient, bundle: dict):
     assert by_key2["병명"]["harness_status"] == "MISSING"
 
 
+def test_doc_detail_without_golden_matches_list_api(client: TestClient, bundle: dict):
+    """Golden 없는 문서는 목록 API(bundle_view)처럼 compare=[], score=None 이어야 한다(가짜 EXTRA 불일치 금지)."""
+    bid = bundle["id"]
+    doc = client.get(f"/api/bundles/{bid}/docs/PH003").json()
+    assert doc["has"]["golden"] is False
+    assert doc["compare"] == []
+    assert doc["score"] == {"ao": None, "harness": None}
+
+
 def test_list_mismatch_matches_compare(client: TestClient, bundle: dict):
     """목록 API의 mismatch 는 상세 compare 에서 ao_status/harness_status 가 MATCH 가 아닌 행 수와 같아야 한다."""
     bid = bundle["id"]

@@ -667,6 +667,8 @@ select.fr-dtype {
 .cmp-group .kind { margin-right: var(--sp-2); padding: 1px 6px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
 .cmp-table tr.is-off td:first-child { box-shadow: inset 2px 0 0 var(--bad); }
 .cmp-table tbody tr:not(.cmp-group):hover td { background: var(--surface-2); }
+.cmp-table tr.is-pending td, .cmp-table tr.is-pending:hover td { background: var(--accent-soft); }
+.badge-pending { background: var(--accent-soft); color: var(--accent-ink); }
 .cmp-table tr.flash td { background: var(--hl); color: #18212e; transition: background .6s; }
 .cmp-key { font-weight: 600; }
 .cmp-row { margin-right: 6px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
