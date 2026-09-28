@@ -8,7 +8,7 @@ import { renderCompare } from './compare.js';
 import { buildReconModel, renderReconHTML, buildMarkdown, renderMarkdownToDom } from './reconstruct.js';
 import { createDocumentRail } from './documentRail.js';
 
-const RAW_KIND = { golden: 'golden', ao: 'ao_extract', harness: 'harness' };
+const RAW_KIND = { golden: 'golden', ao: 'ao_extract', harness: 'harness', ao_ui: 'ao_ui' };
 
 function readFocusMode() {
   try { return localStorage.getItem('lv.bboxMode') === 'locate' ? 'locate' : 'zoom'; } catch { return 'zoom'; }
@@ -340,26 +340,27 @@ export function renderDetail(root, bundleId, docId) {
   function buildRawTab() {
     const viewerHost = el('div', { class: 'json-viewer' });
     const jsonViewer = createJsonViewer(viewerHost);
-    const sel = { golden: el('button', { class: 'active' }, 'Golden'), ao: el('button', {}, 'AO Extract'), harness: el('button', {}, 'Harness') };
-    let current = 'golden';
+    const sourceLabels = { golden: 'Golden', ao: 'AO Extract', harness: 'Harness', ao_ui: 'AO UI' };
+    const sel = Object.fromEntries(Object.entries(sourceLabels)
+      .filter(([key]) => key !== 'ao_ui' || doc.has.ao_ui)
+      .map(([key, label]) => [key, el('button', { disabled: !doc.has[RAW_KIND[key]] }, label)]));
+    let current = Object.keys(sel).find((key) => doc.has[RAW_KIND[key]]) || 'golden';
     function load(kind) {
       current = kind;
       for (const k in sel) sel[k].classList.toggle('active', k === kind);
-      if (!doc.has[RAW_KIND[kind]]) { jsonViewer.showMessage('파일 없음', '이 소스에는 원본 JSON이 없습니다.', 'folder'); return; }
+      if (!doc.has[RAW_KIND[kind]]) { jsonViewer.showMessage(`${sourceLabels[kind]} 파일 없음`, '이 소스에는 원본 JSON이 없습니다.', 'folder'); return; }
       jsonViewer.showMessage('불러오는 중…');
       api.getRaw(bundleId, docId, RAW_KIND[kind]).then((text) => {
         if (kind !== current) return;
         jsonViewer.show(text);
-      }).catch(() => { if (kind === current) jsonViewer.showMessage('파일 없음', '이 소스에는 원본 JSON이 없습니다.', 'folder'); });
+      }).catch(() => { if (kind === current) jsonViewer.showMessage(`${sourceLabels[kind]} 파일을 불러오지 못했습니다.`, '', 'alert-triangle'); });
     }
-    sel.golden.addEventListener('click', () => load('golden'));
-    sel.ao.addEventListener('click', () => load('ao'));
-    sel.harness.addEventListener('click', () => load('harness'));
+    for (const [key, button] of Object.entries(sel)) button.addEventListener('click', () => load(key));
     mount(tabHosts.raw, el('div', { class: 'raw-json-panel' }, [
-      el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'seg' }, [sel.golden, sel.ao, sel.harness])]),
+      el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'seg' }, Object.values(sel))]),
       viewerHost,
     ]));
-    load('golden');
+    load(current);
   }
 
   return () => {

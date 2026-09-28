@@ -2,7 +2,7 @@
 okf_version: "0.2"
 type: dataset
 title: 실전형 dummy2 샘플 번들
-description: e2e 표본결과에서 문서 종류별 실제 이미지와 AO·Harness·정답 JSON 2건씩을 골라 AO UI bbox sidecar와 함께 로컬 검수용 번들로 만드는 규칙과 개인정보 취급을 기록한다.
+description: e2e 표본결과에서 문서 종류별 실제 이미지와 AO·Harness·정답 JSON 2건씩을 골라 기본 UI response 형식 또는 classic AO와 bbox sidecar 형식의 로컬 검수용 번들을 만드는 규칙과 개인정보 취급을 기록한다.
 tags: [label-viewer, dummy-data, e2e, ao, harness, bbox, privacy]
 status: active
 ---
@@ -11,13 +11,15 @@ status: active
 브랜치: `fix/bbox-hover`
 워크트리: `.worktrees/bbox-hover`
 
+업데이트: 2026-09-28 · `fix/ao-upload-raw` · `.worktrees/ao-upload-fix`
+
 ## 목적
 
 기존 `make_dummy_bundle.py`는 OCR 화면 흐름과 값 교정 상태를 보여 주는 합성 문서를 생성한다. `dummy2`는 실제 E2E 문서의 이미지와 AO·Harness·정답 데이터를 사용해 화면의 실제 JSON 구조와 스캔 이미지를 살펴보는 로컬 검수 자료다.
 
 ## 샘플 구성
 
-소스는 `../e2e/표본결과/<문서 종류>/`다. 각 항목은 원본 이미지, 같은 stem의 `.aiocr.json`, `.harness.json`, `.answer.json`이 모두 존재하는 quartet이다. AO 자료는 Harness 요청을 위해 변환된 `.aiocr.adapted.json`이 아니라 원본 AO 응답 `.aiocr.json`을 쓴다. 별도 AO UI run 디렉터리의 `.aiocr.ui.json`이 있는 항목은 함께 복사한다. UI sidecar는 셀 bbox를 제공하며 Golden/AO/Harness 비교값이나 점수에 관여하지 않는다. 아래 파일명은 원본 위치를 다시 찾을 수 있도록 기록한다.
+소스는 `../e2e/표본결과/<문서 종류>/`이며 실제 AO UI response는 별도 run 디렉터리에서 가져온다. 기본 `ui` 형식은 `.aiocr.ui.json`의 `documents[].result`를 `ao_extract/`에 저장하고, 앱이 AO 비교 구조로 정규화한다. `classic` 형식은 원본 `.aiocr.json`을 `ao_extract/`에 두고 UI response를 선택적 `ao_ui/` bbox sidecar로 둔다. 두 형식 모두 Harness 요청을 위해 변환된 `.aiocr.adapted.json`은 사용하지 않는다. 아래 파일명은 원본 위치를 다시 찾을 수 있도록 기록한다.
 
 | 문서 종류 | 샘플 A | 샘플 B | 다양성 |
 |---|---|---|---|
@@ -37,18 +39,18 @@ status: active
 python3 scripts/make_dummy2.py --source-root ../e2e/표본결과 --out samples/dummy2
 ```
 
-생성기는 `e2e/out/ao-ui-205-20260927-204626`을 기본 sidecar 위치로 탐색한다. 경로를 바꾸려면 `--ui-root <ao-ui-run-directory>`를 지정한다. sidecar를 제외하려면 빈 디렉터리를 `--ui-root`로 지정한다.
+생성기는 `e2e/out/ao-ui-205-20260927-204626`을 기본 AO UI response 위치로 탐색한다. 경로를 바꾸려면 `--ui-root <ao-ui-run-directory>`를 지정한다. 기본 생성은 `--ao-format ui`이며, 기존 AO JSON과 분리 sidecar가 필요하면 `--ao-format classic`을 사용한다.
 
-생성 폴더에는 `original/`, `ao_extract/`, `harness/`, `golden/`와 sidecar가 있는 문서의 `ao_ui/`가 있고 ZIP은 `samples/dummy2.zip`이다. 원본 내용은 수정하거나 재인코딩하지 않고 바이트 단위로 복사한다. `D2-<문서종류코드>-<순번>` 별칭을 사용하며 파일 확장자와 데이터 종류 접미사를 보존해 이미지와 JSON이 stem으로 묶인다. 원본의 상대 경로와 각 파일 SHA-256은 로컬의 `provenance.local.json`에만 기록하고 번들 ZIP에서는 제외한다.
+기본 UI 형식의 생성 폴더에는 `original/`, `ao_extract/`, `harness/`, `golden/`이 있고 ZIP은 `samples/dummy2.zip`이다. `classic` 형식은 UI response가 있을 때 `ao_ui/`를 추가한다. 원본 내용은 수정하거나 재인코딩하지 않고 바이트 단위로 복사한다. `D2-<문서종류코드>-<순번>` 별칭을 사용하며 파일 확장자와 데이터 종류 접미사를 보존해 이미지와 JSON이 stem으로 묶인다. 원본의 상대 경로와 각 파일 SHA-256은 로컬의 `provenance.local.json`에만 기록하고 번들 ZIP에서는 제외한다.
 
 E2E 표본에는 전처리 이미지가 없어 이 번들은 원본 이미지 보기만 제공한다.
 
-## 검증
+## UI 형식 검증
 
-- 7종류 × 2건 = 14문서, 이미지·AO·Harness·답안 56개 파일과 사용 가능한 AO UI sidecar를 생성한다. 출력 파일의 SHA-256은 원본과 같고 로컬 provenance는 ZIP에서 빠진다.
-- 생성 ZIP을 앱의 업로드 처리에 넣어 14문서 모두 원본 이미지·AO·Harness·Golden이 짝지어지고 오류가 없음을 확인했다. AO 기준 비교 행 1,431개가 생성됐고 14문서 모두 양쪽 점수가 계산됐다.
-- 1920×1080 Chromium에서 실제 이미지, 14건 문서 레일과 `D2-REC-001`의 비교 행 272개를 확인했다. 페이지 오류는 없었다.
-- 실제 표본의 긴 비교 목록이 상세 화면 전체 높이를 늘리는 현상이 드러나, 상세 화면 높이를 뷰포트에 고정하고 비교 패널 안에서 스크롤되도록 CSS를 보정했다.
+- 기본 생성 ZIP에는 14문서의 이미지·AO UI response·Harness·정답 56개 파일이 있다. 로컬 생성 폴더의 각 파일은 ZIP과 바이트 단위로 일치한다.
+- 업로드 결과 14문서 모두 원본·AO·Harness·Golden으로 묶였고 오류는 없다. 비교 행 1,433개 중 682개에 실제 bbox가 연결됐다.
+- 1920×1080 Chromium에서 AO Extract Raw JSON에 업로드 원문의 `result`가 표시되고, 비교 행 hover 시 bbox 강조·확대·복원이 동작했다.
+- Python 테스트 31개, JavaScript 구문 검사, `git diff --check`를 통과했다.
 
 ## 개인정보 취급
 
