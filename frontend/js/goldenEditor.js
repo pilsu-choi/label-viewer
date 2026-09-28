@@ -191,44 +191,48 @@ export function createGoldenEditor(host, opts) {
     };
   }
 
-  function cellRow(cell, path, onDelete) {
-    if (!cell.dtype) cell.dtype = 'string';
-    const entry = cmap.get(path);
-    const row = el('div', { class: `field-row ${mismatchOf(entry) ? 'mismatch' : ''}`, tabindex: '0' }, [
-      el('input', { type: 'text', value: cell.key, 'aria-label': 'key', oninput: (e) => { cell.key = e.target.value; markDirty(); } }),
-      el('div', { class: 'cell-wrap', ...tipHandlers(path) },
-        el('input', { type: 'text', value: cell.value == null ? '' : cell.value, oninput: (e) => { cell.value = e.target.value; markDirty(); } })),
-      el('select', { onchange: (e) => { cell.dtype = e.target.value; markDirty(); } },
-        DTYPES.map((t) => el('option', { value: t, selected: t === cell.dtype }, t))),
-      el('button', { class: 'field-row-del', title: '삭제', 'aria-label': '삭제', onclick: () => onDelete() }, icon('x')),
-    ]);
-    if (entry) {
-      const sources = [['AO', entry.ao, entry.ao_status], ['Harness', entry.harness, entry.harness_status]];
-      row.classList.add('has-sources');
-      row.appendChild(el('div', { class: 'gs-compare', ...tipHandlers(path) }, sources.map(([label, value, status]) => {
-        const available = value != null && value !== '';
-        const off = status && status !== 'MATCH';
-        return el('button', {
-          class: `gs-chip ${off ? 'is-off' : ''}`,
-          type: 'button', disabled: !available,
+  // AO/Harness 비교 칸: 자체 컬럼(넓은 화면)이거나 값 아래 칩 줄(좁은 화면, 컨테이너 쿼리)로 표시된다.
+  function compareCell(kind, label, entry, path) {
+    const value = entry ? entry[kind] : null;
+    const status = entry ? entry[`${kind}_status`] : null;
+    const available = value != null && value !== '';
+    const off = !!(status && status !== 'MATCH');
+    const content = entry
+      ? el('button', {
+          class: `gs-chip ${off ? 'is-off' : ''}`, type: 'button', disabled: !available,
           title: available ? `${label} 값을 Golden에 채택` : `${label} 값 없음`,
           onclick: () => { applyAdopt(golden, entry, value); markDirty(); render(); },
         }, [
           el('span', { class: 'cap' }, label),
           el('span', { class: 'val' }, available ? String(value) : '—'),
           off ? el('span', { class: 'stat' }, statusLabel(status)) : null,
-        ]);
-      })));
-    }
+        ])
+      : el('span', { class: 'fr-dash' }, '—');
+    return el('div', { class: `fr-${kind} ${off ? 'is-off' : ''}`.trim(), ...tipHandlers(path) }, content);
+  }
+
+  function cellRow(cell, path, onDelete) {
+    if (!cell.dtype) cell.dtype = 'string';
+    const entry = cmap.get(path);
+    const row = el('div', { class: `field-row ${mismatchOf(entry) ? 'mismatch' : ''}`, tabindex: '0' }, [
+      el('input', { type: 'text', class: 'fr-label', value: cell.key, 'aria-label': 'key', oninput: (e) => { cell.key = e.target.value; markDirty(); } }),
+      el('div', { class: 'fr-value cell-wrap', ...tipHandlers(path) },
+        el('input', { type: 'text', value: cell.value == null ? '' : cell.value, oninput: (e) => { cell.value = e.target.value; markDirty(); } })),
+      el('div', { class: 'fr-compare' }, [compareCell('ao', 'AO', entry, path), compareCell('harness', 'Harness', entry, path)]),
+      el('select', { class: 'fr-dtype', onchange: (e) => { cell.dtype = e.target.value; markDirty(); } },
+        DTYPES.map((t) => el('option', { value: t, selected: t === cell.dtype }, t))),
+      el('button', { class: 'fr-del field-row-del', title: '삭제', 'aria-label': '삭제', onclick: () => onDelete() }, icon('x')),
+    ]);
     return row;
   }
 
   // 섹션 헤더: fs-xs 라벨 + 개수 + 우측 ghost sm 추가 버튼. 빈 섹션은 한 줄로 축소한다.
-  function sectionShell(label, count, addLabel, onAdd, body) {
-    if (!count) return el('div', { class: 'section-block' }, el('div', { class: 'section-empty' }, [
+  function sectionShell(label, count, addLabel, onAdd, body, extraClass = '') {
+    const cls = `section-block ${extraClass}`.trim();
+    if (!count) return el('div', { class: cls }, el('div', { class: 'section-empty' }, [
       `${label}이 없습니다`, el('button', { class: 'btn ghost sm', onclick: onAdd }, [icon('plus'), addLabel]),
     ]));
-    return el('div', { class: 'section-block' }, [
+    return el('div', { class: cls }, [
       el('div', { class: 'section-head' }, [
         el('span', { class: 'section-label' }, label), el('span', { class: 'section-count' }, String(count)),
         el('div', { class: 'grow' }),
@@ -238,13 +242,37 @@ export function createGoldenEditor(host, opts) {
     ]);
   }
 
+  // 필드 그리드 헤더(항목/값/AO/Harness/타입/삭제) — Fields 섹션과 각 그룹 카드가 공유한다.
+  function fieldsGridHead() {
+    return el('div', { class: 'gs-grid-head' }, [
+      el('span', { class: 'fr-label' }, '항목'),
+      el('span', { class: 'fr-value' }, '값'),
+      el('span', { class: 'fr-ao' }, 'AO'),
+      el('span', { class: 'fr-harness' }, 'Harness'),
+      el('span', { class: 'fr-dtype' }, '타입'),
+      el('span', { class: 'fr-del' }),
+    ]);
+  }
+
+  // 새 필드를 문서 최상위에 추가하고, 스크롤 위치를 유지한 채 새 행의 라벨에 포커스한다.
+  function addFieldTop() {
+    if (!doc.golden) return;
+    const d0 = ensureDoc0();
+    d0.extracted_fields.push({ key: '새 필드', value: '', dtype: 'string' });
+    markDirty();
+    rerenderAt('.section-fields .field-row:last-child .fr-label');
+  }
+
   function renderFieldsSection(d0) {
-    const body = el('div', { class: 'section-body' });
+    const rows = el('div', { class: 'gs-grid-body' });
     d0.extracted_fields.forEach((cell, idx) => {
-      body.appendChild(cellRow(cell, `documents[0].fields[${cell.key}]`, () => { d0.extracted_fields.splice(idx, 1); markDirty(); render(); }));
+      rows.appendChild(cellRow(cell, `documents[0].fields[${cell.key}]`, () => {
+        d0.extracted_fields.splice(idx, 1); markDirty();
+        rerenderAt(`.section-fields .field-row:nth-child(${idx + 1}) .fr-label`, `.section-fields .field-row:nth-child(${idx}) .fr-label`);
+      }));
     });
-    const addField = () => { d0.extracted_fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); };
-    return sectionShell('필드', d0.extracted_fields.length, '필드 추가', addField, body);
+    const body = d0.extracted_fields.length ? el('div', { class: 'gs-grid-wrap' }, [fieldsGridHead(), rows]) : null;
+    return sectionShell('필드', d0.extracted_fields.length, '필드 추가', addFieldTop, body, 'section-fields');
   }
 
   function renderGroupsSection(d0) {
@@ -252,22 +280,36 @@ export function createGoldenEditor(host, opts) {
     d0.extracted_groups.forEach((g, gi) => {
       if (!g.fields) g.fields = [];
       const collapsed = collapsedGroups.has(gi);
-      const fieldsHost = el('div', { class: `group-fields ${collapsed ? 'collapsed' : ''}` });
+      const rows = el('div', { class: 'gs-grid-body' });
       g.fields.forEach((cell, fi) => {
-        fieldsHost.appendChild(cellRow(cell, `documents[0].groups[${g.key}].fields[${cell.key}]`, () => { g.fields.splice(fi, 1); markDirty(); render(); }));
+        rows.appendChild(cellRow(cell, `documents[0].groups[${g.key}].fields[${cell.key}]`, () => {
+          g.fields.splice(fi, 1); markDirty();
+          rerenderAt(`.group-block[data-group-index="${gi}"] .field-row:nth-child(${fi + 1}) .fr-label`, `.group-block[data-group-index="${gi}"] .field-row:nth-child(${fi}) .fr-label`);
+        }));
       });
-      fieldsHost.appendChild(el('button', { class: 'btn ghost sm', onclick: () => { g.fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); } }, [icon('plus'), '필드 추가']));
-      body.appendChild(el('div', { class: 'group-block' }, [
+      const grid = g.fields.length ? el('div', { class: 'gs-grid-wrap' }, [fieldsGridHead(), rows]) : el('div', { class: 'section-empty sm' }, '필드가 없습니다');
+      const fieldsHost = el('div', { class: `group-fields ${collapsed ? 'collapsed' : ''}` }, [
+        grid,
+        el('button', { class: 'btn ghost sm', onclick: () => {
+          g.fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty();
+          rerenderAt(`.group-block[data-group-index="${gi}"] .field-row:last-child .fr-label`);
+        } }, [icon('plus'), '필드 추가']),
+      ]);
+      body.appendChild(el('div', { class: 'group-block', dataset: { groupIndex: gi } }, [
         el('div', { class: 'group-head' }, [
           el('button', { class: 'chev', onclick: () => { collapsed ? collapsedGroups.delete(gi) : collapsedGroups.add(gi); render(); } }, icon(collapsed ? 'chevron-right' : 'chevron-down')),
           el('input', { type: 'text', value: g.key, oninput: (e) => { g.key = e.target.value; markDirty(); } }),
+          el('span', { class: 'group-count' }, String(g.fields.length)),
           el('button', { class: 'field-row-del', title: '그룹 삭제', onclick: () => { d0.extracted_groups.splice(gi, 1); markDirty(); render(); } }, icon('x')),
         ]),
         fieldsHost,
       ]));
     });
-    const addGroup = () => { d0.extracted_groups.push({ key: '새 그룹', fields: [] }); markDirty(); render(); };
-    return sectionShell('그룹', d0.extracted_groups.length, '그룹 추가', addGroup, body);
+    const addGroup = () => {
+      d0.extracted_groups.push({ key: '새 그룹', fields: [] }); markDirty();
+      rerenderAt('.section-groups .group-block:last-child .group-head input[type="text"]');
+    };
+    return sectionShell('그룹', d0.extracted_groups.length, '그룹 추가', addGroup, body, 'section-groups');
   }
 
   function renderTablesSection(d0) {
@@ -323,8 +365,11 @@ export function createGoldenEditor(host, opts) {
         ]),
       ]));
     });
-    const addTable = () => { d0.extracted_tables.push({ key: '새 표', headers: ['열1'], rows: [] }); markDirty(); render(); };
-    return sectionShell('표', d0.extracted_tables.length, '표 추가', addTable, body);
+    const addTable = () => {
+      d0.extracted_tables.push({ key: '새 표', headers: ['열1'], rows: [] }); markDirty();
+      rerenderAt('.section-tables .table-block:last-child .table-head-row input[type="text"]');
+    };
+    return sectionShell('표', d0.extracted_tables.length, '표 추가', addTable, body, 'section-tables');
   }
 
   function renderAdvanced() {
@@ -354,7 +399,7 @@ export function createGoldenEditor(host, opts) {
     isDirty: () => dirty,
     isAutosaveOn: () => autosave,
     save: () => { debouncedSave.cancel(); return doSave(); },
-    addField: () => { if (!doc.golden) return; const d0 = ensureDoc0(); d0.extracted_fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); },
+    addField: () => addFieldTop(),
     deleteFocused: () => {
       const active = host.querySelector('.field-row:focus-within, .field-row:hover');
       if (active) { const del = active.querySelector('.field-row-del'); if (del) del.click(); }
