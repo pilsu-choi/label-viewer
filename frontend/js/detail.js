@@ -134,7 +134,9 @@ export function renderDetail(root, bundleId, docId) {
     if (helpOverlay) return;
     const rows = [['← / →', '이전 / 다음 문서'], ['Ctrl+S', '저장'], ['+', '필드 추가'], ['Delete', '필드 삭제'],
       ['M / Shift+M', '다음 / 이전 불일치 (편집 탭에서는 편집기 안에서 이동)'], ['O', '원본/전처리 전환'], ['Z', 'bbox hover 확대/위치표시 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'],
-      ['[', '문서 목록 접기/펼치기'], [']', '검수 패널 접기/펼치기'], ['?', '도움말']];
+      ['[', '문서 목록 접기/펼치기'], [']', '검수 패널 접기/펼치기'],
+      ['↑ / ↓ (비교 탭)', '행 이동 (접힌 소그룹은 헤더에서 멈춤)'], ['A / H (비교 탭)', 'AO / Harness 값 채택'], ['Enter (비교 탭)', '근거 고정/해제, 소그룹 헤더에서는 접기/펼치기'],
+      ['?', '도움말']];
     helpOverlay = el('div', { class: 'help-overlay', onclick: (e) => { if (e.target === helpOverlay) closeHelp(); } },
       el('div', { class: 'help-card' }, [
         el('h3', {}, '단축키'),
