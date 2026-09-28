@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Golden 검수</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="top">
+  <a class="brand" href="#/">Golden 검수</a>
+  <select id="typeSel" title="문서 종류"></select>
+  <button id="pickBtn" class="picker" title="문서 목록 (d)"><span id="docName">문서 선택</span><span id="docPos"></span></button>
+  <button id="prevDoc" class="icon" title="이전 문서 ([)">‹</button>
+  <button id="nextDoc" class="icon" title="다음 문서 (])">›</button>
+  <nav class="tabs"><a href="#/" id="tabReview">검수</a><a href="#/stats" id="tabStats">통계</a></nav>
+  <span class="spacer"></span>
+  <span id="dirty" hidden>저장 안 됨</span>
+  <button id="saveBtn" class="primary" title="저장 (s, Ctrl+S)" disabled>저장</button>
+  <a id="xlsx" class="btn" href="/api/export.xlsx" download>Excel 다운로드</a>
+  <button id="helpBtn" class="icon" title="단축키 (?)">?</button>
+</header>
+
+<main id="review">
+  <section id="imgPane">
+    <div class="bar">
+      <span class="seg" id="viewSeg">
+        <button data-view="original">원본</button><button data-view="processed">전처리</button>
+      </span>
+      <span id="fell" class="badge warn" hidden title="전처리 이미지가 없어 원본을 보여줍니다">원본 대체</span>
+      <span class="pages" id="pageNav"><button class="icon" data-page="-1">‹</button><span id="pageNo">1 / 1</span><button class="icon" data-page="1">›</button></span>
+      <span class="spacer"></span>
+      <label class="boxall" title="모든 칸의 위치 표시 (b)"><input type="checkbox" id="boxAll">전체 박스</label>
+      <span class="seg"><button data-zoom="fit" title="맞춤 (f)">맞춤</button><button data-zoom="out">−</button><button data-zoom="in">+</button><button data-zoom="1">100%</button></span>
+      <span id="zoomPct" class="num"></span>
+    </div>
+    <div id="stage"><div id="canvas"><img id="img" alt="" draggable="false"><div id="boxes"></div></div></div>
+    <div id="approx" hidden>원본 위 근사 위치</div>
+  </section>
+  <div id="divider" title="끌어서 너비 조절"></div>
+  <section id="fieldPane">
+    <div id="docHead"></div>
+    <div id="filters">
+      <span id="chips" class="seg"></span>
+      <input id="q" type="search" placeholder="필드·값 검색 (/)" autocomplete="off">
+    </div>
+    <div id="tableWrap">
+      <div id="scroller">
+        <table id="grid">
+          <colgroup><col class="c-f"><col><col><col><col class="c-s"><col class="c-x"></colgroup>
+          <thead><tr><th>필드</th><th>Golden</th><th>AO</th><th>Harness</th><th>상태</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div id="ruler" title="오류 위치"></div>
+    </div>
+    <div id="evidence"></div>
+  </section>
+</main>
+
+<main id="stats" hidden></main>
+
+<aside id="picker" class="drawer left" hidden>
+  <div class="drawer-head">
+    <input id="pickQ" type="search" placeholder="파일명 검색" autocomplete="off">
+    <label><input type="checkbox" id="pickErr">오류 있음</label>
+    <label><input type="checkbox" id="pickTodo">미완료</label>
+  </div>
+  <div class="drawer-body"><table id="pickList"><thead><tr><th>파일</th><th>종류</th><th class="num">오류</th><th>검수</th><th class="num">H</th></tr></thead><tbody></tbody></table></div>
+</aside>
+
+<aside id="raw" class="drawer right" hidden>
+  <div class="drawer-head">
+    <span class="seg" id="rawTabs"></span>
+    <input id="rawQ" type="search" placeholder="찾기 (Enter)" autocomplete="off">
+    <span id="rawHits" class="num"></span>
+    <span class="spacer"></span>
+    <button id="rawCopy">복사</button>
+    <button id="rawClose" class="icon" title="닫기 (Esc)">×</button>
+  </div>
+  <pre id="rawBody"></pre>
+</aside>
+
+<dialog id="help">
+  <h2>단축키</h2>
+  <table>
+    <tr><th>j / ↓, k / ↑</th><td>다음·이전 칸</td></tr>
+    <tr><th>n / p</th><td>다음·이전 오류 칸 (끝나면 오류 있는 다음 문서)</td></tr>
+    <tr><th>1 / 2</th><td>AO 값 채택 / Harness 값 채택</td></tr>
+    <tr><th>e, Enter, 더블클릭</th><td>Golden 직접 수정 (Enter 확정, Esc 취소)</td></tr>
+    <tr><th>0</th><td>칸 없음(∅)으로 설정</td></tr>
+    <tr><th>u</th><td>이 칸의 저장 전 수정 되돌리기</td></tr>
+    <tr><th>Space</th><td>검수 확인 표시</td></tr>
+    <tr><th>s, Ctrl+S</th><td>저장</td></tr>
+    <tr><th>c</th><td>문서 검수 완료 표시</td></tr>
+    <tr><th>[ / ]</th><td>이전·다음 문서</td></tr>
+    <tr><th>d</th><td>문서 목록</td></tr>
+    <tr><th>/</th><td>필드 검색</td></tr>
+    <tr><th>o</th><td>원본·전처리 전환</td></tr>
+    <tr><th>f, b</th><td>이미지 맞춤, 전체 박스 표시</td></tr>
+    <tr><th>r</th><td>원본 JSON 보기</td></tr>
+    <tr><th>Esc</th><td>창 닫기</td></tr>
+  </table>
+  <p>이미지: 휠로 확대·축소, 끌어서 이동, 박스를 누르면 해당 칸으로 이동합니다.</p>
+  <form method="dialog"><button>닫기</button></form>
+</dialog>
+
+<div id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
