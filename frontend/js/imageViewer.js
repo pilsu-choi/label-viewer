@@ -16,6 +16,10 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   let scale = 1, tx = 0, ty = 0, natW = 0, natH = 0, imgEl = null;
   let pendingBoxes = [], focusView = null;
   let mode = focusMode === 'locate' ? 'locate' : 'zoom';
+  // fitMode: 'page' | 'width' | 'manual' — stage 크기 변화(스플리터 드래그·윈도우 리사이즈·패널 접기/펼치기) 시
+  // 어떻게 다시 맞출지 결정한다. page/width 는 다시 맞춤, manual 은 중심점을 유지한 채 비율 조정.
+  let fitMode = 'page';
+  let prevStageW = 0, prevStageH = 0;
 
   function apply() { canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; if (onZoomChange) onZoomChange(scale); updateMinimap(); }
 
@@ -46,6 +50,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
 
   function zoomAt(factor, cx, cy) {
     if (!natW) return;
+    fitMode = 'manual';
     const rect = stage.getBoundingClientRect();
     const px = cx == null ? rect.width / 2 : cx - rect.left;
     const py = cy == null ? rect.height / 2 : cy - rect.top;
@@ -61,6 +66,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
 
   function fitWidth() {
     if (!natW) return;
+    fitMode = 'width';
     scale = Math.max(0.02, (stage.clientWidth - PAGE_MARGIN * 2) / natW);
     tx = PAGE_MARGIN; ty = PAGE_MARGIN;
     apply();
@@ -68,11 +74,39 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
 
   function fitPage() {
     if (!natW) return;
+    fitMode = 'page';
     scale = Math.max(0.02, Math.min((stage.clientWidth - PAGE_MARGIN * 2) / natW, (stage.clientHeight - PAGE_MARGIN * 2) / natH));
     tx = (stage.clientWidth - natW * scale) / 2;
     ty = (stage.clientHeight - natH * scale) / 2;
     apply();
   }
+
+  // stage 크기가 바뀌었을 때(스플리터 드래그, 창 리사이즈, 패널 접기/펼치기) 현재 fitMode 에 맞춰
+  // 다시 맞추거나(page/width), 중심점을 유지한 채 비율로 재조정한다(manual). bbox 포커스 중에는 건드리지 않는다.
+  function handleStageResize() {
+    const newW = stage.clientWidth, newH = stage.clientHeight;
+    if (!natW || focusView) { prevStageW = newW; prevStageH = newH; return; }
+    if (fitMode === 'page') fitPage();
+    else if (fitMode === 'width') fitWidth();
+    else if (prevStageW && newW !== prevStageW) {
+      const factor = newW / prevStageW;
+      if (isFinite(factor) && factor > 0) {
+        const imgX = (prevStageW / 2 - tx) / scale, imgY = (prevStageH / 2 - ty) / scale;
+        scale = Math.max(0.02, Math.min(8, scale * factor));
+        tx = newW / 2 - imgX * scale;
+        ty = newH / 2 - imgY * scale;
+        apply();
+      }
+    }
+    prevStageW = newW; prevStageH = newH;
+  }
+
+  let resizeRAF = null;
+  const resizeObserver = new ResizeObserver(() => {
+    if (resizeRAF) return;
+    resizeRAF = requestAnimationFrame(() => { resizeRAF = null; handleStageResize(); });
+  });
+  resizeObserver.observe(stage);
 
   let panning = false, lastX = 0, lastY = 0;
   const onMouseDown = (e) => {
@@ -82,6 +116,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   };
   const onMouseMove = (e) => {
     if (!panning) return;
+    fitMode = 'manual';
     tx += e.clientX - lastX; ty += e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
     apply();
@@ -194,6 +229,8 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
     zoomIn: () => zoomAt(1.25), zoomOut: () => zoomAt(0.8), fitWidth, fitPage,
     getScale: () => scale,
     destroy: () => {
+      resizeObserver.disconnect();
+      if (resizeRAF) cancelAnimationFrame(resizeRAF);
       window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('mousemove', onMmMove); window.removeEventListener('mouseup', onMmUp);
     },

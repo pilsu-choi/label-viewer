@@ -5,8 +5,8 @@ function diffSpan(goldenVal, val) {
   return el('span', { class: 'cmp-val' }, parts.map((p) => p.changed ? el('span', { class: 'diff-add' }, p.text) : document.createTextNode(p.text)));
 }
 
-function evidencePopover(x, y, entry) {
-  const box = el('div', { class: 'evidence-pop', style: `left:${Math.min(x + 14, window.innerWidth - 356)}px;top:${Math.min(y + 14, window.innerHeight - 200)}px` });
+function evidencePopover(entry) {
+  const box = el('div', { class: 'evidence-pop' });
   const rows = [];
   rows.push(el('div', { class: 'ev-row' }, [el('span', {}, '경로'), el('span', { class: 'mono' }, entry.path)]));
   if (entry.ao_confidence != null) rows.push(el('div', { class: 'ev-row' }, [el('span', {}, 'AO 신뢰도'), el('span', {}, fmtPct(entry.ao_confidence))]));
@@ -42,8 +42,57 @@ function evidencePopover(x, y, entry) {
   return box;
 }
 
+// 근거 팝오버 상태: hover-intent(짧은 지연 뒤 숨김, 포인터가 팝오버로 이동하면 취소)와
+// 클릭 고정(핀)을 지원한다. 핀 상태에서는 Esc·바깥 클릭·같은 행 재클릭으로만 닫힌다.
 let popEl = null;
-function hidePop() { if (popEl) { popEl.remove(); popEl = null; } }
+let pinned = false;
+let hideTimer = null;
+let anchorRow = null;
+let lastBbox = null;
+let hoverBboxCb = null;
+
+function clearHideTimer() { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } }
+function scheduleHide() { clearHideTimer(); hideTimer = setTimeout(hidePop, 200); }
+function onEsc(ev) { if (ev.key === 'Escape') hidePop(); }
+function onOutsideClick(ev) {
+  if (popEl && !popEl.contains(ev.target) && (!anchorRow || !anchorRow.contains(ev.target))) hidePop();
+}
+function hidePop() {
+  clearHideTimer();
+  if (popEl) { popEl.remove(); popEl = null; }
+  pinned = false; anchorRow = null;
+  document.removeEventListener('keydown', onEsc);
+  document.removeEventListener('mousedown', onOutsideClick, true);
+  if (hoverBboxCb) { hoverBboxCb(null); hoverBboxCb = null; }
+}
+
+// 뷰포트 안에 들어오도록 위치를 잡는다: 오른쪽/아래로 넘치면 각각 왼쪽으로 접거나 위로 뒤집는다.
+function positionPop(x, y) {
+  if (!popEl) return;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const r = popEl.getBoundingClientRect();
+  let left = Math.min(x + 14, vw - r.width - 8);
+  left = Math.max(8, left);
+  let top = y + 14;
+  if (top + r.height > vh - 8) top = y - r.height - 14;
+  top = Math.max(8, top);
+  popEl.style.left = `${left}px`;
+  popEl.style.top = `${top}px`;
+}
+
+function openPop(tr, entry, x, y, onHoverBbox) {
+  clearHideTimer();
+  if (popEl) popEl.remove();
+  popEl = evidencePopover(entry);
+  popEl.addEventListener('mouseenter', clearHideTimer);
+  popEl.addEventListener('mouseleave', () => { if (!pinned) scheduleHide(); });
+  document.body.appendChild(popEl);
+  positionPop(x, y);
+  anchorRow = tr;
+  lastBbox = entry.bbox || null;
+  hoverBboxCb = onHoverBbox || null;
+  if (lastBbox && onHoverBbox) onHoverBbox(lastBbox);
+}
 
 export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
   const state = { filter: 'all' };
@@ -101,14 +150,20 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
         tbody.appendChild(el('tr', { class: 'cmp-group' }, el('td', { colspan: '5' }, [el('span', { class: 'kind' }, kind), container || null])));
         for (const e of rows) {
           const off = [e.ao_status, e.harness_status].some((st) => st && st !== 'MATCH');
-          const tr = el('tr', { class: off ? 'is-off' : '', dataset: { path: e.path },
-            onmouseenter: (ev) => {
-              if (e.bbox && onHoverBbox) onHoverBbox(e.bbox);
-              popEl = evidencePopover(ev.clientX, ev.clientY, e);
-              document.body.appendChild(popEl);
+          const tr = el('tr', { class: off ? 'is-off' : '', dataset: { path: e.path }, tabindex: '0',
+            onmouseenter: (ev) => { if (!pinned || anchorRow === tr) openPop(tr, e, ev.clientX, ev.clientY, onHoverBbox); },
+            onmousemove: (ev) => { if (popEl && anchorRow === tr && !pinned) positionPop(ev.clientX, ev.clientY); },
+            onmouseleave: () => { if (!pinned) scheduleHide(); },
+            onclick: (ev) => {
+              if (ev.target.closest('.cmp-adopt')) return;
+              if (pinned && anchorRow === tr) { hidePop(); return; }
+              // 이미 hover로 열려 있으면(같은 행) 재생성하지 않고 그대로 고정해 스크롤 위치를 보존한다.
+              if (!popEl || anchorRow !== tr) openPop(tr, e, ev.clientX, ev.clientY, onHoverBbox);
+              pinned = true;
+              popEl.classList.add('pinned');
+              document.addEventListener('keydown', onEsc);
+              document.addEventListener('mousedown', onOutsideClick, true);
             },
-            onmousemove: (ev) => { if (popEl) { popEl.style.left = `${Math.min(ev.clientX + 14, window.innerWidth - 356)}px`; popEl.style.top = `${Math.min(ev.clientY + 14, window.innerHeight - 200)}px`; } },
-            onmouseleave: () => { hidePop(); if (onHoverBbox) onHoverBbox(null); },
           }, [
             el('td', {}, [e.area === 'table' ? el('span', { class: 'cmp-row' }, typeof e.row === 'number' ? `#${e.row + 1}` : `#${Number(String(e.row).slice(1)) + 1} 추가`) : null, el('span', { class: 'cmp-key' }, e.key)]),
             el('td', {}, el('span', { class: 'cmp-val' }, e.golden == null ? '—' : String(e.golden))),
