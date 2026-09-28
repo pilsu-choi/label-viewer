@@ -493,7 +493,7 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .section-empty.sm { height: auto; padding: var(--sp-2) var(--sp-3); justify-content: flex-start; }
 .doctype-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; }
 .doctype-row label { flex: none; font-size: var(--fs-md); font-weight: 600; color: var(--ink-2); }
-.doctype-row input { flex: 1; }
+.doctype-row input, .doctype-row select { flex: 1; }
 
 /* 필드 그리드 — 헤더와 행이 같은 grid-template-areas 를 공유하는 표 형태 컨테이너 */
 .gs-grid-wrap { border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; background: var(--surface); }
