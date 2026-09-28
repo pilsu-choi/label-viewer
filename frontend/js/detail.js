@@ -55,7 +55,7 @@ export function renderDetail(root, bundleId, docId) {
     else if (e.key === 'ArrowRight') { if (doc.next) navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.next)}`); }
     else if (e.key === '+') { editor && editor.addField(); }
     else if (e.key === 'Delete') { editor && editor.deleteFocused(); }
-    else if (e.key === 'm' || e.key === 'M') { jumpNextMismatch(); }
+    else if (e.key === 'm' || e.key === 'M') { jumpNextMismatch(e.shiftKey ? -1 : 1); }
     else if (e.key === 'o' || e.key === 'O') { toggleView(); }
     else if (e.key === 'z' || e.key === 'Z') { setFocusMode(state.focusMode === 'zoom' ? 'locate' : 'zoom'); }
     else if (e.key === '1') { setReconSource('golden'); }
@@ -66,10 +66,12 @@ export function renderDetail(root, bundleId, docId) {
     else if (e.key === '?') { openHelp(); }
   }
 
-  function jumpNextMismatch() {
+  // 편집 탭이면 편집기 안에서 이동(입력칸 포커스 유지), 그 외 탭이면 비교 탭으로 전환해 강조한다.
+  function jumpNextMismatch(dir = 1) {
+    if (state.tab === 'edit') { editor && editor.focusMismatch(dir); return; }
     const entries = (doc.compare || []).filter(isMismatch);
     if (!entries.length) { toast('불일치 항목이 없습니다.'); return; }
-    state.mismatchCursor = (state.mismatchCursor + 1) % entries.length;
+    state.mismatchCursor = (state.mismatchCursor + dir + entries.length) % entries.length;
     setTab('compare');
     compareApi && compareApi.flashPath(entries[state.mismatchCursor].path);
   }
@@ -131,7 +133,7 @@ export function renderDetail(root, bundleId, docId) {
   function openHelp() {
     if (helpOverlay) return;
     const rows = [['← / →', '이전 / 다음 문서'], ['Ctrl+S', '저장'], ['+', '필드 추가'], ['Delete', '필드 삭제'],
-      ['M', '다음 불일치'], ['O', '원본/전처리 전환'], ['Z', 'bbox hover 확대/위치표시 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'],
+      ['M / Shift+M', '다음 / 이전 불일치 (편집 탭에서는 편집기 안에서 이동)'], ['O', '원본/전처리 전환'], ['Z', 'bbox hover 확대/위치표시 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'],
       ['[', '문서 목록 접기/펼치기'], [']', '검수 패널 접기/펼치기'], ['?', '도움말']];
     helpOverlay = el('div', { class: 'help-overlay', onclick: (e) => { if (e.target === helpOverlay) closeHelp(); } },
       el('div', { class: 'help-card' }, [
