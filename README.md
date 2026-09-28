@@ -1,4 +1,4 @@
-# label_veiwer
+# label_viewer
 
 보험 OCR 결과(AO Extract·Harness)를 검수하고 정답지(Golden Set)를 만들고·고치고·비교·채점하는 독립 Web App이다. DB는 쓰지 않는다. 번들 폴더의 파일이 원본 데이터이고, 정답지도 JSON 파일로 저장한다.
 
@@ -60,6 +60,12 @@ bundle/
 
 표 행은 행 서명으로 짝짓는다. 채점은 문서 단위와 번들 전체 단위로 모두 볼 수 있다.
 
+## 상세 검수 화면
+
+상세 화면은 문서 목록, 이미지 뷰어, Golden Set 검수 영역을 하나의 작업 공간에 배치한다. 왼쪽 목록에서 ID·유형을 검색하고 검수 상태로 거를 수 있다. 중앙에서 원본과 전처리 이미지를 확인하며, 우측의 Golden 편집 행에서 AO·Harness 값을 비교하고 바로 채택할 수 있다. 편집 행이나 비교 항목에 마우스를 올리면 비교값·상태·근거가 나타나며 연결된 bbox가 있으면 이미지에 함께 강조된다.
+
+우측의 비교 탭은 mismatch·missing·extra를 필터링하고, Reconstructed View는 Golden·AO·Harness 데이터를 HTML 또는 Markdown으로 보여 준다. 문서 목록과 이미지, 이미지와 검수 패널, 검수 패널과 재구성 뷰 사이의 경계를 끌어 크기를 조절할 수 있다. Golden 편집은 기본적으로 1.5초 뒤 자동 저장된다.
+
 ## 단축키 (상세 화면)
 
 | 키 | 동작 |
@@ -67,7 +73,7 @@ bundle/
 | `←` / `→` | 이전 / 다음 문서 |
 | `Ctrl+S` | 저장 (자동 저장은 기본 켜짐, 1.5초) |
 | `+` / `Delete` | 필드 추가 / 삭제 |
-| `M` | 다음 불일치 칸으로 이동 |
+| `M` | 다음 불일치 항목으로 이동 |
 | `O` | 원본 ↔ 전처리 이미지 |
 | `1` `2` `3` | Reconstructed View 원본을 Golden / AO / Harness로 전환 |
 | `?` | 도움말 |
@@ -87,7 +93,7 @@ kubectl apply -k deploy/k8s          # PVC(/data) + Deployment(Recreate) + Servi
 
 ```text
 backend/   app.py(라우트) · bundle.py(업로드·매칭·저장) · compare.py(정규화·비교·채점) · export.py(ZIP·Excel)
-frontend/  index.html · app.css · app.js · js/(upload·list·detail·goldenEditor·compare·imageViewer·reconstruct)
+frontend/  index.html · app.css · app.js · js/(upload·list·documentRail·detail·goldenEditor·compare·imageViewer·reconstruct)
 scripts/   make_dummy_bundle.py
 tests/     test_app.py
 deploy/k8s pvc · deployment · service · kustomization

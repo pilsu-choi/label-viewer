@@ -8,9 +8,10 @@ let tooltipEl = null;
 function showTip(x, y, entry) {
   hideTip();
   if (!entry) return;
-  tooltipEl = el('div', { class: 'tooltip-pop', style: `left:${x + 12}px;top:${y + 12}px` }, [
+  tooltipEl = el('div', { class: 'tooltip-pop', style: `left:${Math.min(x + 12, window.innerWidth - 300)}px;top:${Math.min(y + 12, window.innerHeight - 130)}px` }, [
     el('div', {}, [el('b', {}, 'AO'), entry.ao === '' || entry.ao == null ? '—' : String(entry.ao), entry.ao_status ? ` (${statusLabel(entry.ao_status)})` : '']),
     el('div', {}, [el('b', {}, 'Harness'), entry.harness === '' || entry.harness == null ? '—' : String(entry.harness), entry.harness_status ? ` (${statusLabel(entry.harness_status)})` : '']),
+    entry.evidence && entry.evidence.correction_basis ? el('div', { class: 'gs-tip-evidence' }, `근거 · ${entry.evidence.correction_basis}`) : null,
   ]);
   document.body.appendChild(tooltipEl);
 }
@@ -84,6 +85,7 @@ export function createGoldenEditor(host, opts) {
     return api.putGolden(bundleId, docId, golden).then((res) => {
       doc = res; cmap = compareMap(doc.compare);
       dirty = false; listeners.dirty(false); listeners.ok(res);
+      if (!host.contains(document.activeElement) || !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) render();
     }).catch((e) => { listeners.err(e); toast(`저장 실패: ${e.message}`, 'error'); });
   }
 
@@ -174,7 +176,7 @@ export function createGoldenEditor(host, opts) {
   function tipHandlers(path) {
     return {
       onmouseenter: (e) => { const entry = cmap.get(path); showTip(e.clientX, e.clientY, entry); if (entry && entry.bbox && opts.onHoverBbox) opts.onHoverBbox(entry.bbox); },
-      onmousemove: (e) => { if (tooltipEl) { tooltipEl.style.left = `${e.clientX + 12}px`; tooltipEl.style.top = `${e.clientY + 12}px`; } },
+      onmousemove: (e) => { if (tooltipEl) { tooltipEl.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 300)}px`; tooltipEl.style.top = `${Math.min(e.clientY + 12, window.innerHeight - 130)}px`; } },
       onmouseleave: () => { hideTip(); if (opts.onHoverBbox) opts.onHoverBbox(null); },
     };
   }
@@ -190,6 +192,23 @@ export function createGoldenEditor(host, opts) {
         DTYPES.map((t) => el('option', { value: t, selected: t === cell.dtype }, t))),
       el('button', { class: 'btn btn-ghost btn-icon btn-danger', title: '삭제', onclick: () => onDelete() }, icon('x')),
     ]);
+    if (entry) {
+      const sources = [['AO', entry.ao, entry.ao_status], ['Harness', entry.harness, entry.harness_status]];
+      row.classList.add('has-sources');
+      row.appendChild(el('div', { class: 'gs-source-strip', ...tipHandlers(path) }, sources.map(([label, value, status]) => {
+        const available = value != null && value !== '';
+        return el('button', {
+          class: `gs-source-item ${status && status !== 'MATCH' ? 'is-off' : ''}`,
+          type: 'button', disabled: !available,
+          title: available ? `${label} 값을 Golden에 채택` : `${label} 값 없음`,
+          onclick: () => { applyAdopt(golden, entry, value); markDirty(); render(); },
+        }, [
+          el('span', { class: 'gs-source-label' }, label),
+          el('span', { class: 'gs-source-value' }, available ? String(value) : '—'),
+          status && status !== 'MATCH' ? el('span', { class: 'gs-source-status' }, statusLabel(status)) : null,
+        ]);
+      })));
+    }
     return row;
   }
 

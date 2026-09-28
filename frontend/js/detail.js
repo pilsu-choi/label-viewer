@@ -5,18 +5,20 @@ import { createImageViewer } from './imageViewer.js';
 import { createGoldenEditor } from './goldenEditor.js';
 import { renderCompare } from './compare.js';
 import { buildReconModel, renderReconHTML, buildMarkdown, renderMarkdownToDom } from './reconstruct.js';
+import { createDocumentRail } from './documentRail.js';
 
 const RAW_KIND = { golden: 'golden', ao: 'ao_extract', harness: 'harness' };
 
 export function renderDetail(root, bundleId, docId) {
   const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1 };
-  let doc = null, editor = null, compareApi = null, imgViewer = null;
+  let doc = null, bundle = null, editor = null, compareApi = null, imgViewer = null, documentRail = null;
   let saveStateEl, reviewInput, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
   let leftPanel, rightPanel, closeExportMenus, dragCleanup;
   let destroyed = false;
 
   mount(root, el('div', { class: 'loading-block' }, '불러오는 중…'));
 
+  api.getBundle(bundleId).then((b) => { if (destroyed) return; bundle = b; if (documentRail) documentRail.update(bundle.docs, docId); }).catch(() => {});
   api.getDoc(bundleId, docId).then((d) => {
     if (destroyed) return;
     doc = d; state.view = doc.has.original ? 'original' : 'preprocessed'; build();
@@ -116,10 +118,20 @@ export function renderDetail(root, bundleId, docId) {
 
   function refreshAfterDocUpdate(updated) {
     doc = updated;
+    syncDocumentRail();
     compareApi && compareApi.refresh(doc);
     drawRecon();
     if (reviewInput) reviewInput.checked = doc.review === 'done';
     updateTabCounts();
+  }
+
+  function syncDocumentRail() {
+    if (!bundle || !doc) return;
+    bundle.docs = bundle.docs.map((item) => item.id === docId ? {
+      ...item, has: doc.has, errors: doc.errors, review: doc.review, score: doc.score,
+      doc_type: doc.golden?.documents?.[0]?.doc_type || item.doc_type,
+    } : item);
+    documentRail?.update(bundle.docs, docId);
   }
 
   function updateTabCounts() {
@@ -151,9 +163,11 @@ export function renderDetail(root, bundleId, docId) {
 
     saveStateEl = el('span', { class: 'save-state' }, 'Saved');
     reviewInput = el('input', { type: 'checkbox', checked: doc.review === 'done',
-      onchange: (e) => { api.putReview(bundleId, docId, e.target.checked ? 'done' : '').then(() => { doc.review = e.target.checked ? 'done' : ''; toast('검수 상태를 변경했습니다.'); }).catch((err) => toast(err.message, 'error')); } });
+      onchange: (e) => { const review = e.target.checked ? 'done' : ''; api.putReview(bundleId, docId, review).then(() => { doc.review = review; syncDocumentRail(); toast('검수 상태를 변경했습니다.'); }).catch((err) => { e.target.checked = doc.review === 'done'; toast(err.message, 'error'); }); } });
 
     const topbar = el('div', { class: 'topbar detail-topbar' }, [
+      el('a', { class: 'brand', href: '#/' }, 'Label Viewer'),
+      el('div', { class: 'sep' }),
       el('a', { class: 'back', href: `#/b/${encodeURIComponent(bundleId)}` }, [icon('left'), '목록']),
       el('div', { class: 'nav-group' }, [
         el('button', { class: 'btn btn-icon', disabled: !doc.prev, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.prev)}`), title: '이전 문서 (←)', 'aria-label': '이전 문서' }, icon('left')),
@@ -272,6 +286,19 @@ export function renderDetail(root, bundleId, docId) {
     };
 
     const body = el('div', { class: 'detail-body' }, [leftPanel, resizer, rightPanel]);
+    const railHost = el('aside', { class: 'doc-rail', 'aria-label': '문서 목록' });
+    const railResizer = el('div', { class: 'doc-rail-resizer', role: 'separator', 'aria-label': '문서 목록 너비 조절' });
+    let railDragging = false;
+    const onRailMove = (e) => { if (railDragging) railHost.style.width = `${Math.max(180, Math.min(360, e.clientX - railHost.getBoundingClientRect().left))}px`; };
+    const onRailUp = () => { railDragging = false; railResizer.classList.remove('active'); };
+    railResizer.addEventListener('mousedown', (e) => { e.preventDefault(); railDragging = true; railResizer.classList.add('active'); });
+    window.addEventListener('mousemove', onRailMove);
+    window.addEventListener('mouseup', onRailUp);
+    const cleanupPanelDrags = dragCleanup;
+    dragCleanup = () => { cleanupPanelDrags(); window.removeEventListener('mousemove', onRailMove); window.removeEventListener('mouseup', onRailUp); };
+    documentRail = createDocumentRail(railHost, bundle?.docs || [], docId,
+      (nextId) => nextId !== docId && navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(nextId)}`));
+    const workspace = el('div', { class: 'detail-main' }, [railHost, railResizer, body]);
 
     const screen = el('div', { class: 'detail-screen' }, [
       topbar,
@@ -279,7 +306,7 @@ export function renderDetail(root, bundleId, docId) {
         `이 문서에서 오류가 발견되었습니다:`,
         el('ul', { class: 'error-list' }, doc.errors.map((msg) => el('li', {}, msg))),
       ]) : null,
-      body,
+      workspace,
     ]);
     mount(root, screen);
 
@@ -319,6 +346,7 @@ export function renderDetail(root, bundleId, docId) {
     document.removeEventListener('keydown', onKeydown);
     if (closeExportMenus) document.removeEventListener('click', closeExportMenus);
     if (dragCleanup) dragCleanup();
+    if (documentRail) documentRail.destroy();
     setNavGuard(null);
     editor && editor.destroy();
     imgViewer && imgViewer.destroy();
