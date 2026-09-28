@@ -95,6 +95,16 @@ export function statusLabel(status) {
   return { MATCH: '일치', MISMATCH: '불일치', MISSING: '누락', EXTRA: '추가', TYPE_MISMATCH: '형식오류' }[status] || status || '';
 }
 
+export function statusDescription(status) {
+  return {
+    MATCH: 'Golden과 비교값이 정규화 후 일치합니다.',
+    MISMATCH: 'Golden에 값이 있지만 비교값이 다릅니다.',
+    MISSING: 'Golden에는 값이 있지만 비교 결과에는 없습니다.',
+    EXTRA: 'Golden에는 없는 값이 비교 결과에 있습니다.',
+    TYPE_MISMATCH: '비교값이 필요한 숫자 또는 표 형식과 다릅니다.',
+  }[status] || '';
+}
+
 // 정답(golden) 문자열 대비 비교값의 문자 단위 diff. [{text, changed}] 배열 반환.
 export function charDiff(golden, other) {
   const a = golden == null ? '' : String(golden);
@@ -136,7 +146,7 @@ export const STATUSES = ['MATCH', 'MISMATCH', 'MISSING', 'EXTRA', 'TYPE_MISMATCH
 const STATUS_TONE = { MATCH: 'ok', MISMATCH: 'bad', MISSING: 'warn', EXTRA: 'extra', TYPE_MISMATCH: 'type' };
 
 export function statusBadge(status) {
-  return el('span', { class: `badge badge-${STATUS_TONE[status] || 'muted'}` }, status ? statusLabel(status) : '—');
+  return el('span', { class: `badge badge-${STATUS_TONE[status] || 'muted'}`, title: statusDescription(status) }, status ? statusLabel(status) : '—');
 }
 
 // 정확도 + 상태 분포 막대 + 범례. score 가 없으면 hint 를 보여 준다.
@@ -147,9 +157,9 @@ export function scoreCard(title, score, hint = 'Golden이 있어야 채점됩니
   return el('div', { class: 'score-card' }, [
     head,
     el('div', { class: 'score-bar' }, STATUSES.filter((k) => score[k]).map((k) =>
-      el('span', { class: `tone-${STATUS_TONE[k]}`, style: `width:${(score[k] / total) * 100}%`, title: `${statusLabel(k)} ${score[k]}` }))),
+      el('span', { class: `tone-${STATUS_TONE[k]}`, style: `width:${(score[k] / total) * 100}%`, title: `${statusLabel(k)} ${score[k]}건 · ${statusDescription(k)}` }))),
     el('div', { class: 'sc-legend' }, STATUSES.map((k) =>
-      el('span', { class: score[k] ? '' : 'zero' }, [el('i', { class: `tone-${STATUS_TONE[k]}` }), statusLabel(k), el('b', {}, String(score[k] || 0))]))),
+      el('span', { class: score[k] ? '' : 'zero', title: statusDescription(k) }, [el('i', { class: `tone-${STATUS_TONE[k]}` }), statusLabel(k), el('b', {}, String(score[k] || 0))]))),
   ]);
 }
 

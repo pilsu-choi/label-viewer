@@ -120,8 +120,42 @@ def _align(headers: list[str], grows: list[dict], orows: list[dict]) -> tuple[di
     return g_to_o, o_extra
 
 
+def _token_boxes(cell: dict | None) -> list[dict]:
+    boxes = []
+    for region in (cell or {}).get("token_bbox") or []:
+        page = region.get("page", 1)
+        for box in region.get("token_bbox") or []:
+            if isinstance(box, list) and len(box) == 4:
+                boxes.append({"page": page, "box": box})
+    return boxes
+
+
+def _ui_bbox_index(doc: dict | None) -> dict[tuple[str, str, Any, str], list[dict]]:
+    """AO UI field/group/table cells → compare row locator to normalized boxes."""
+    result = (doc or {}).get("result") or {}
+    boxes: dict[tuple[str, str, Any, str], list[dict]] = {}
+    for cell in result.get("fields") or []:
+        if cell.get("key"):
+            boxes[("field", "", "", cell["key"])] = _token_boxes(cell)
+    for group in result.get("groups") or []:
+        group_key = group.get("key", "")
+        for cell in group.get("fields") or []:
+            key = cell.get("key", "").removeprefix(f"{group_key}.")
+            if key:
+                boxes[("group", group_key, "", key)] = _token_boxes(cell)
+    for table in result.get("tables") or []:
+        table_key = table.get("key", "")
+        for row_index, row in enumerate(table.get("rows") or []):
+            for cell in row:
+                key = cell.get("key", "").rsplit(".", 1)[-1]
+                if key:
+                    boxes[("table", table_key, row_index, key)] = _token_boxes(cell)
+    return boxes
+
+
 def _row(doc_i: int, area: str, container: str, row: Any, key: str, dtype: str,
-         gcell: dict | None, acell: dict | None, hcell: dict | None) -> dict:
+         gcell: dict | None, acell: dict | None, hcell: dict | None,
+         ui_bbox: list[dict] | None = None) -> dict:
     gval = (gcell or {}).get("value") if gcell is not None else None
     aval = acell.get("value") if acell is not None else None
     hval = harness_value(hcell) if hcell is not None else None
@@ -140,6 +174,7 @@ def _row(doc_i: int, area: str, container: str, row: Any, key: str, dtype: str,
         if c and c.get("bbox"):
             bbox = c["bbox"]
             break
+    bbox = bbox or ui_bbox
     return {
         "path": path, "doc": doc_i, "area": area, "container": container or "",
         "row": row if row is not None else "", "key": key, "dtype": dtype,
@@ -151,7 +186,8 @@ def _row(doc_i: int, area: str, container: str, row: Any, key: str, dtype: str,
     }
 
 
-def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | None) -> list[dict]:
+def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | None,
+                ui_doc: dict | None = None) -> list[dict]:
     """golden 이 있으면 golden 기준, 없으면 AO(없으면 harness) 구조 기준으로 비교 행을 만든다."""
     has_golden = gdoc is not None
     base = gdoc if has_golden else (adoc if adoc is not None else hdoc)
@@ -159,6 +195,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
         return []
     ai = DocIndex(adoc, is_harness=False)
     hi = DocIndex(hdoc, is_harness=True)
+    ui_boxes = _ui_bbox_index(ui_doc)
     rows: list[dict] = []
     consumed_a: set[int] = set()
     consumed_h: set[int] = set()
@@ -174,7 +211,8 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
         acell = take(ai, None, key, consumed_a) if has_golden else ai.find(None, key)
         hcell = take(hi, None, key, consumed_h) if has_golden else hi.find(None, key)
         gcell = c if has_golden else None
-        rows.append(_row(doc_i, "field", "", "", key, dtype, gcell, acell, hcell))
+        rows.append(_row(doc_i, "field", "", "", key, dtype, gcell, acell, hcell,
+                         ui_boxes.get(("field", "", "", key))))
 
     for g in base.get("extracted_groups") or []:
         gk = g.get("key")
@@ -183,7 +221,8 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
             acell = take(ai, gk, key, consumed_a) if has_golden else ai.find(gk, key)
             hcell = take(hi, gk, key, consumed_h) if has_golden else hi.find(gk, key)
             gcell = c if has_golden else None
-            rows.append(_row(doc_i, "group", gk, "", key, dtype, gcell, acell, hcell))
+            rows.append(_row(doc_i, "group", gk, "", key, dtype, gcell, acell, hcell,
+                             ui_boxes.get(("group", gk, "", key))))
 
     for t in base.get("extracted_tables") or []:
         tk = t.get("key")
@@ -214,7 +253,9 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
                     if gcell is None:
                         continue
                     dtype = gcell.get("dtype") or "string"
-                    rows.append(_row(doc_i, "table", tk, gi, col, dtype, gcell, arow.get(col), hrow.get(col)))
+                    ui_row = g_to_a.get(gi)
+                    rows.append(_row(doc_i, "table", tk, gi, col, dtype, gcell, arow.get(col), hrow.get(col),
+                                     ui_boxes.get(("table", tk, ui_row, col)) if ui_row is not None else None))
             # 정답에 없는 결과 행: AO·Harness 의 k번째 추가 행을 한 줄로 묶는다
             for k, (ai_idx, hi_idx) in enumerate(zip_longest(sorted(a_extra), sorted(h_extra))):
                 arow = arows[ai_idx] if ai_idx is not None else {}
@@ -222,7 +263,8 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
                 for col in dict.fromkeys([*arow, *hrow]):
                     cell = arow.get(col) or hrow.get(col)
                     rows.append(_row(doc_i, "table", tk, f"+{len(grows) + k}", col, cell.get("dtype") or "string",
-                                      None, arow.get(col), hrow.get(col)))
+                                      None, arow.get(col), hrow.get(col),
+                                      ui_boxes.get(("table", tk, ai_idx if ai_idx is not None else hi_idx, col))))
         else:
             # golden 없음: base(ao 또는 harness) 표 그대로 보여주고, 있으면 다른 쪽 값도 같은 행 index로 곁들인다
             other_rows = hrows if adoc is not None else []
@@ -234,9 +276,11 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
                         continue
                     dtype = cell.get("dtype") or "string"
                     if adoc is not None:
-                        rows.append(_row(doc_i, "table", tk, ridx, col, dtype, None, cell, other.get(col)))
+                        rows.append(_row(doc_i, "table", tk, ridx, col, dtype, None, cell, other.get(col),
+                                         ui_boxes.get(("table", tk, ridx, col))))
                     else:
-                        rows.append(_row(doc_i, "table", tk, ridx, col, dtype, None, None, cell))
+                        rows.append(_row(doc_i, "table", tk, ridx, col, dtype, None, None, cell,
+                                         ui_boxes.get(("table", tk, ridx, col))))
 
     if has_golden:
         # 정답에 없는 필드: key 로 AO·Harness 를 한 줄로 묶는다
@@ -249,12 +293,17 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
                 extra.setdefault(key, [group, None, None])[i + 1] = cell
         for key, (group, acell, hcell) in extra.items():
             dtype = (acell or hcell).get("dtype") or "string"
-            rows.append(_row(doc_i, "group" if group else "field", group or "", "", key, dtype, None, acell, hcell))
+            area = "group" if group else "field"
+            ui_bbox = ui_boxes.get((area, group or "", "", key))
+            if ui_bbox is None and area == "field":
+                ui_bbox = ui_boxes.get(("group", group or "", "", key))
+            rows.append(_row(doc_i, area, group or "", "", key, dtype, None, acell, hcell, ui_bbox))
 
     return rows
 
 
-def compare_bundle(golden: dict | None, ao: dict | None, harness: dict | None) -> list[dict]:
+def compare_bundle(golden: dict | None, ao: dict | None, harness: dict | None,
+                   ao_ui: dict | None = None) -> list[dict]:
     gdocs = (golden or {}).get("documents") or []
     adocs = (ao or {}).get("documents") or []
     hdocs = (harness or {}).get("documents") or []
@@ -267,7 +316,9 @@ def compare_bundle(golden: dict | None, ao: dict | None, harness: dict | None) -
         gdoc = gdocs[i] if i < len(gdocs) and golden is not None else None
         adoc = adocs[i] if i < len(adocs) else None
         hdoc = hdocs[i] if i < len(hdocs) else None
-        rows += compare_doc(i, gdoc, adoc, hdoc)
+        ui_docs = (ao_ui or {}).get("documents") or []
+        ui_doc = ui_docs[i] if i < len(ui_docs) else None
+        rows += compare_doc(i, gdoc, adoc, hdoc, ui_doc)
     return rows
 
 
