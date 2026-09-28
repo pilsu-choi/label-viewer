@@ -1,9 +1,15 @@
-import { el, clear, mount, charDiff, fmtPct, statusBadge, scoreCard, statusDescription, isMismatch, icon, toast } from './util.js';
+import { el, clear, mount, charDiff, fmtPct, statusBadge, scoreCard, statusDescription, isMismatch, entryState, STATUSES, STATUS_TONE, icon, toast } from './util.js';
 
-// 필터 키 순서. 'mismatch_all' 은 탭 배지·사이드바·편집 탭 요약과 같은 isMismatch 기준.
-const FILTER_KEYS = ['all', 'mismatch_all', 'mismatch', 'missing', 'extra'];
+// 필터 키 순서. 기본은 불일치 전체이고 '전체'는 마지막. 'mismatch_all' 은 탭 배지·사이드바·편집 탭 요약과 같은 isMismatch 기준.
+const FILTER_KEYS = ['mismatch_all', 'mismatch', 'missing', 'extra', 'all'];
 const FILTER_LABEL = { all: '전체', mismatch_all: '불일치 전체', mismatch: '불일치', missing: '누락', extra: '추가' };
 const FILTER_STATUS = { mismatch: ['MISMATCH', 'TYPE_MISMATCH'], missing: ['MISSING'], extra: ['EXTRA'] };
+
+// 선택한 필터/점수 카드 펼침 상태를 기억한다(세션 간).
+function readStr(key, fallback) { try { const v = localStorage.getItem(key); return v == null ? fallback : v; } catch { return fallback; } }
+function writeStr(key, val) { try { localStorage.setItem(key, val); } catch {} }
+function readFlag(key) { try { return localStorage.getItem(key) === '1'; } catch { return false; } }
+function writeFlag(key, val) { try { localStorage.setItem(key, val ? '1' : '0'); } catch {} }
 
 // 필터 판정과 칩 개수 집계를 하나로 묶는다: 칩 숫자는 항상 "이 필터를 눌렀을 때 보이는 행 수"와 같다.
 function matchesFilter(e, key) {
@@ -32,6 +38,29 @@ function entryLocation(entry) {
     ? `추가 행 ${Number(row.slice(1)) + 1}`
     : `#${Number(row) + 1}`;
   return `${container} › ${rowLabel} › ${key}`;
+}
+
+// AO/Harness 값 셀: 값이 있으면 편집 탭 .gs-chip 스타일을 재사용한 채택 버튼, 없으면 일반 칸.
+// Golden 이 비어 있으면(EXTRA 성격) 빈 문자열과의 문자 diff 로 전체가 빨갛게 보이지 않도록 diff 없이 중립색으로 보여준다.
+function valueCell(kind, label, e, goldenVal, onAdopt) {
+  const value = e[kind];
+  const status = e[`${kind}_status`];
+  const goldenEmpty = goldenVal == null || goldenVal === '';
+  const valSpan = goldenEmpty ? el('span', { class: 'cmp-val' }, value == null || value === '' ? '—' : String(value)) : diffSpan(goldenVal, value);
+  const body = [valSpan, statusBadge(status)];
+  const available = value != null && value !== '';
+  if (!onAdopt || !available) return el('td', {}, el('div', { class: 'cmp-cell' }, body));
+  return el('td', {}, el('button', {
+    class: 'gs-chip cmp-chip', type: 'button', title: `${label} 값을 Golden에 채택`,
+    onclick: (ev) => { ev.stopPropagation(); onAdopt(e, value); },
+  }, body));
+}
+
+// 점수 카드의 압축 한 줄 요약(제목·정확도·작은 상태 막대). scoreCard() 와 같은 톤(STATUS_TONE)을 쓴다.
+function scoreMini(label, score) {
+  const bar = score ? el('span', { class: 'cmp-score-mini-bar' }, STATUSES.filter((k) => score[k]).map((k) =>
+    el('i', { class: `tone-${STATUS_TONE[k]}`, style: `width:${(score[k] / (score.total || 1)) * 100}%`, title: `${k} ${score[k]}` }))) : null;
+  return el('span', { class: 'cmp-score-mini' }, [el('b', {}, label), ` ${score ? fmtPct(score.accuracy) : '—'}`, bar]);
 }
 
 function evidencePopover(entry) {
@@ -149,7 +178,8 @@ function openPop(tr, entry, x, y, onHoverBbox) {
 }
 
 export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = {}) {
-  const state = { filter: 'all' };
+  const savedFilter = readStr('lv.cmpFilter', '');
+  const state = { filter: FILTER_KEYS.includes(savedFilter) ? savedFilter : 'mismatch_all', scoreExpanded: readFlag('lv.cmpScoreExpanded') };
   // 채택했지만 아직 저장되지 않은 항목: path → 낙관적으로 보여줄 값. refresh() 에서 비운다.
   const pending = new Map();
   draw();
@@ -182,9 +212,19 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
       title: key === 'all' ? '모든 비교 항목을 표시합니다.'
         : key === 'mismatch_all' ? '편집 탭·탭 배지와 같은 기준(Golden 대비 AO 또는 Harness 값이 하나라도 다름)입니다.'
         : key === 'mismatch' ? `${statusDescription('MISMATCH')} 형식오류도 포함합니다.` : statusDescription(key.toUpperCase()),
-      onclick: () => { state.filter = key; draw(); },
+      onclick: () => { state.filter = key; writeStr('lv.cmpFilter', key); draw(); },
     }, [FILTER_LABEL[key], el('span', { class: `seg-count ${c[key] && key !== 'all' ? 'bad' : ''}` }, String(c[key]))])));
-    const scoreCards = el('div', { class: 'cmp-score-cards' }, [scoreCard('AO Extract', doc.score && doc.score.ao), scoreCard('Harness', doc.score && doc.score.harness)]);
+    // 점수 카드: 기본은 한 줄 요약, 클릭하면 펼침 상태를 기억하며 scoreCard() 상세로 바꾼다.
+    const scoreToggle = el('button', {
+      class: 'cmp-score-toggle', type: 'button', title: state.scoreExpanded ? '점수 상세 접기' : '점수 상세 펼치기',
+      onclick: () => { state.scoreExpanded = !state.scoreExpanded; writeFlag('lv.cmpScoreExpanded', state.scoreExpanded); draw(true); },
+    }, [
+      el('div', { class: 'cmp-score-line' }, [scoreMini('AO', doc.score && doc.score.ao), scoreMini('Harness', doc.score && doc.score.harness)]),
+      icon(state.scoreExpanded ? 'chevrons-down-up' : 'chevrons-up-down'),
+    ]);
+    const scoreCards = state.scoreExpanded
+      ? el('div', { class: 'cmp-score-cards' }, [scoreCard('AO Extract', doc.score && doc.score.ao), scoreCard('Harness', doc.score && doc.score.harness)])
+      : null;
 
     const filtered = list.filter((e) => matchesFilter(e, state.filter));
     const groups = new Map();
@@ -202,18 +242,19 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
       for (const [gk, rows] of groups) {
         const [area, container] = gk.split('::');
         const kind = { field: '필드', group: '그룹', table: '표' }[area];
-        tbody.appendChild(el('tr', { class: 'cmp-group' }, el('td', { colspan: '5' }, [el('span', { class: 'kind' }, kind), container || null])));
+        tbody.appendChild(el('tr', { class: 'cmp-group' }, el('td', { colspan: '4' }, [el('span', { class: 'kind' }, kind), container || null])));
         for (const e of rows) {
           const isPending = pending.has(e.path);
           const pendingVal = pending.get(e.path);
           const goldenVal = isPending ? pendingVal : e.golden;
-          const off = !isPending && [e.ao_status, e.harness_status].some((st) => st && st !== 'MATCH');
-          const tr = el('tr', { class: `${off ? 'is-off' : ''} ${isPending ? 'is-pending' : ''}`.trim(), dataset: { path: e.path }, tabindex: '0',
+          // 행/셀 상태는 편집 탭과 같은 entryState 하나로 정한다: bad(값 불일치) > warn(Golden 빈 값) > weak(한쪽 소스만 누락/추가).
+          const rowState = isPending ? '' : entryState(e, goldenVal);
+          const tr = el('tr', { class: `${rowState} ${isPending ? 'is-pending' : ''}`.trim(), dataset: { path: e.path }, tabindex: '0',
             onmouseenter: (ev) => { if (!pinned || anchorRow === tr) openPop(tr, e, ev.clientX, ev.clientY, onHoverBbox); },
             onmousemove: (ev) => { if (popEl && anchorRow === tr && !pinned) positionPop(ev.clientX, ev.clientY); },
             onmouseleave: () => { if (!pinned) scheduleHide(); },
             onclick: (ev) => {
-              if (ev.target.closest('.cmp-adopt')) return;
+              if (ev.target.closest('.cmp-chip')) return;
               if (pinned && anchorRow === tr) { hidePop(); return; }
               // 이미 hover로 열려 있으면(같은 행) 재생성하지 않고 그대로 고정해 스크롤 위치를 보존한다.
               if (!popEl || anchorRow !== tr) openPop(tr, e, ev.clientX, ev.clientY, onHoverBbox);
@@ -223,27 +264,23 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
               document.addEventListener('mousedown', onOutsideClick, true);
             },
           }, [
-            el('td', {}, [e.area === 'table' ? el('span', { class: 'cmp-row' }, typeof e.row === 'number' ? `#${e.row + 1}` : `#${Number(String(e.row).slice(1)) + 1} 추가`) : null, el('span', { class: 'cmp-key' }, e.key)]),
-            el('td', {}, [
+            el('td', {}, el('div', { class: 'cmp-item' }, [e.area === 'table' ? el('span', { class: 'cmp-row' }, typeof e.row === 'number' ? `#${e.row + 1}` : `#${Number(String(e.row).slice(1)) + 1} 추가`) : null, el('span', { class: 'cmp-key', title: e.key }, e.key)])),
+            el('td', { class: rowState === 'warn' ? 'cmp-golden-warn' : '' }, [
               el('span', { class: 'cmp-val' }, goldenVal == null ? '—' : String(goldenVal)),
               isPending ? el('span', { class: 'badge badge-pending', title: '저장되면 실제 비교 결과로 반영됩니다.' }, '채택됨 · 저장 대기') : null,
             ]),
-            el('td', {}, el('div', { class: 'cmp-cell' }, [diffSpan(goldenVal, e.ao), statusBadge(e.ao_status)])),
-            el('td', {}, el('div', { class: 'cmp-cell' }, [diffSpan(goldenVal, e.harness), statusBadge(e.harness_status)])),
-            el('td', { class: 'cmp-adopt' }, [
-              onAdopt && e.ao != null && e.ao !== '' && el('button', { class: 'btn sm', title: 'AO 값을 정답으로', onclick: () => onAdopt(e, e.ao) }, 'AO 채택'),
-              onAdopt && e.harness != null && e.harness !== '' && el('button', { class: 'btn sm', title: 'Harness 값을 정답으로', onclick: () => onAdopt(e, e.harness) }, 'H 채택'),
-            ]),
+            valueCell('ao', 'AO', e, goldenVal, onAdopt),
+            valueCell('harness', 'Harness', e, goldenVal, onAdopt),
           ]);
           tbody.appendChild(tr);
         }
       }
       tableWrap.appendChild(el('table', { class: 'cmp-table' }, [
-        el('thead', {}, el('tr', {}, ['항목', 'Golden', 'AO', 'Harness', ''].map((h) => el('th', {}, h)))),
+        el('thead', {}, el('tr', {}, ['항목', 'Golden', 'AO', 'Harness'].map((h) => el('th', {}, h)))),
         tbody,
       ]));
     }
-    mount(host, [toolbar, scoreCards, tableWrap]);
+    mount(host, [toolbar, scoreToggle, scoreCards, tableWrap]);
 
     if (preserveScroll) {
       const anchorRowEl = anchorPath && tableWrap.querySelector(`tr[data-path="${CSS.escape(anchorPath)}"]`);
@@ -255,7 +292,10 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
     // onAdopt 호출 직후 detail.js 가 불러 저장 대기 상태를 낙관적으로 표시한다.
     markAdopted(path, value) { pending.set(path, value); draw(true); },
     flashPath(path) {
-      state.filter = 'all'; draw();
+      // 대상 행이 현재 필터에 없을 때만 필터를 '전체'로 바꾼다. 이미 보이는 행이면 필터를 유지한다.
+      const entry = (doc.compare || []).find((c) => c.path === path);
+      if (!entry || !matchesFilter(entry, state.filter)) { state.filter = 'all'; writeStr('lv.cmpFilter', 'all'); }
+      draw();
       const row = host.querySelector(`tr[data-path="${CSS.escape(path)}"]`);
       if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1400); }
       return row;

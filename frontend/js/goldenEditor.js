@@ -1,4 +1,4 @@
-import { el, clear, debounce, toast, statusLabel, icon, menuButton, josa, isMismatch } from './util.js';
+import { el, clear, debounce, toast, statusLabel, icon, menuButton, josa, isMismatch, hasSourceValue, entryState } from './util.js';
 import { api } from './api.js';
 import { cellDisplay } from './reconstruct.js';
 
@@ -23,23 +23,8 @@ function compareMap(compareList) {
   return m;
 }
 
-// 행 좌측 상태 바: 불일치 > Golden 빈 값(경고) > 없음(일치)
-function rowStateClass(value, entry) {
-  if (isMismatch(entry)) return 'mismatch';
-  if (value == null || value === '') return 'warn';
-  return '';
-}
-
-// 소스(AO/Harness)에 값이 있는지 — 요약 바의 "빈 값" 집계, 표 셀 warn 판정에 쓴다.
-function hasSourceValue(entry) {
-  return !!(entry && ((entry.ao != null && entry.ao !== '') || (entry.harness != null && entry.harness !== '')));
-}
-
-// 표 셀 상태: rowStateClass 와 같되, warn 은 소스에 값이 있을 때만(빈 표 칸을 과도하게 표시하지 않도록).
-function cellStateClass(value, entry) {
-  const base = rowStateClass(value, entry);
-  return base === 'warn' && !hasSourceValue(entry) ? '' : base;
-}
+// 행/셀 상태는 비교 탭과 같은 util.entryState(entry, goldenValue) 하나로 판정한다:
+// 'bad'(값 불일치) | 'warn'(Golden 이 비어서 생긴 차이) | 'weak'(한쪽 소스만 누락/추가) | ''(일치).
 
 // key 처럼 실수로 바뀌면 안 되는 입력: 기본 readOnly, 더블클릭/Enter 로 편집, blur/Enter 로 종료
 function keyInput(value, ariaLabel, onChange, cls = '') {
@@ -288,10 +273,13 @@ export function createGoldenEditor(host, opts) {
     const value = entry ? entry[kind] : null;
     const status = entry ? entry[`${kind}_status`] : null;
     const available = value != null && value !== '';
-    const off = !!(status && status !== 'MATCH');
+    // 이 소스 자체의 상태(행 전체를 아우르는 entryState 와 달리 kind 하나만 본다): 값이 실제로 다르면 bad,
+    // 이 소스에만 값이 없으면(MISSING) 약하게(weak), Golden 이 비어서 생긴 EXTRA 는 중립(소스 값 색은 그대로).
+    const kindState = status === 'MISMATCH' || status === 'TYPE_MISMATCH' ? 'bad' : status === 'MISSING' ? 'weak' : '';
+    const showStat = !!(status && status !== 'MATCH');
     const content = entry
       ? el('button', {
-          class: `gs-chip ${off ? 'is-off' : ''}`, type: 'button', disabled: !available,
+          class: `gs-chip ${kindState ? `st-${kindState}` : ''}`.trim(), type: 'button', disabled: !available,
           title: available ? `${label} 값을 Golden에 채택` : `${label} 값 없음`,
           onclick: () => {
             applyAdopt(golden, entry, value); markDirty();
@@ -301,16 +289,16 @@ export function createGoldenEditor(host, opts) {
         }, [
           el('span', { class: 'cap' }, label),
           el('span', { class: 'val' }, available ? String(value) : '—'),
-          off ? el('span', { class: 'stat' }, statusLabel(status)) : null,
+          showStat ? el('span', { class: 'stat' }, statusLabel(status)) : null,
         ])
       : el('span', { class: 'fr-dash' }, '—');
-    return el('div', { class: `fr-${kind} ${off ? 'is-off' : ''}`.trim(), ...tipHandlers(path) }, content);
+    return el('div', { class: `fr-${kind} ${kindState === 'bad' ? 'is-bad' : ''}`.trim(), ...tipHandlers(path) }, content);
   }
 
   function cellRow(cell, path, onDelete) {
     if (!cell.dtype) cell.dtype = 'string';
     const entry = cmap.get(path);
-    const row = el('div', { class: `field-row ${rowStateClass(cell.value, entry)}`, tabindex: '0', dataset: { path } }, [
+    const row = el('div', { class: `field-row ${entryState(entry, cell.value)}`.trim(), tabindex: '0', dataset: { path } }, [
       keyInput(cell.key, 'key', (v) => { cell.key = v; markDirty(); }, 'fr-label'),
       el('div', { class: 'fr-value cell-wrap', ...tipHandlers(path) },
         el('input', { type: 'text', value: cell.value == null ? '' : cell.value, placeholder: '값 없음',
@@ -454,8 +442,8 @@ export function createGoldenEditor(host, opts) {
         ...t.headers.map((h, ci) => {
           const cell = row[ci] || (row[ci] = { key: h, value: '', dtype: 'string' });
           const path = `documents[0].tables[${t.key}].rows[${ri}].cells[${cell.key}]`;
-          const cls = cellStateClass(cell.value, cmap.get(path));
-          if (cls === 'mismatch') mismatchCount++;
+          const cls = entryState(cmap.get(path), cell.value);
+          if (cls === 'bad') mismatchCount++;
           return el('td', { class: cls, dataset: { path }, ...tipHandlers(path) }, el('input', { type: 'text', value: cell.value == null ? '' : cell.value,
             onfocus: () => showAdoptBar(ri, h, path),
             oninput: (e) => { cell.value = e.target.value; markDirty(); } }));
