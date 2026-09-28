@@ -37,6 +37,19 @@ status: active
 - `scripts/make_dummy_bundle.py`: 테스트용 더미 번들 6건. 목록은 README에 있다. 이미지에는 정답 값을 그리고, AO와 Harness 결과에 오류를 일부러 넣었다.
 - `Dockerfile`, `deploy/k8s/`(PVC·Deployment Recreate·Service·kustomization).
 
+## UI 개편 (`feat/ui-refresh`)
+
+사용자 피드백("UI가 허접하다")을 받고 `frontend-design` 스킬로 시각 체계를 다시 잡았다.
+
+- 콘셉트는 교정지 검수대다. 종이와 잉크 같은 슬레이트 중립 톤을 바탕에 깔고, 형광펜 노랑(`--hl`) 한 가지만 "지금 봐야 할 곳"에 쓴다. 대상은 hover한 칸, 이미지 bbox, `M`으로 이동한 칸, 드롭 중인 영역, 검수 완료 표시다.
+- 이미지 영역은 어두운 라이트테이블 배경이라 스캔본이 도드라진다.
+- 서체는 Pretendard이고 한글 음절과 Latin 부분 집합 woff2 3종을 `frontend/fonts/`에 넣었다. 폐쇄망이라 CDN을 쓰지 않는다.
+- 업로드 화면은 번들 구조 도식으로 stem 매칭 규칙을 보여 준다.
+- 목록 화면은 검수 진행률, AO와 Harness 정확도, Harness 보정 효과(정확도 차이 p)를 한 줄에 둔다.
+- 비교표는 틀린 행 왼쪽에 빨간 선을 긋고, 채택 버튼은 hover할 때만 보인다.
+- `list.js`와 `compare.js`에 중복돼 있던 `scoreCard`·상태 색, 두 화면의 내보내기 메뉴를 `util.js`의 `scoreCard`·`statusBadge`·`menuButton`·`icon`으로 합쳤다.
+- 밝은 화면, 어두운 화면, 모바일(390px)에서 콘솔 오류 없이 표시되는 것을 확인했다.
+
 ## 검증
 
 - `pytest tests` 24건 통과.

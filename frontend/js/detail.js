@@ -1,4 +1,4 @@
-import { el, clear, mount, toast, isEditingTarget } from './util.js';
+import { el, clear, mount, toast, isEditingTarget, icon, menuButton } from './util.js';
 import { api } from './api.js';
 import { navigate, setNavGuard } from './router.js';
 import { createImageViewer } from './imageViewer.js';
@@ -129,26 +129,18 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function exportMenu() {
-    const menu = el('div', { class: 'chip', style: 'position:relative;cursor:pointer', onclick: (e) => {
-      e.stopPropagation();
-      const pop = e.currentTarget.querySelector('.export-pop');
-      pop.style.display = pop.style.display === 'block' ? 'none' : 'block';
-    } }, [
-      'Export ▾',
-      el('div', { class: 'export-pop', style: 'display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;box-shadow:var(--shadow-pop);z-index:50;min-width:170px' }, [
-        el('button', { class: 'btn btn-ghost', style: 'display:flex;width:100%;border-radius:0;justify-content:flex-start', onclick: () => {
-          const g = (editor && editor.getGoldenObject()) || doc.golden;
-          if (!g) { toast('Golden Set이 없습니다.', 'error'); return; }
-          const blob = new Blob([JSON.stringify(g, null, 2)], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = el('a', { href: url, download: `${docId}.json` });
-          document.body.appendChild(a); a.click(); a.remove();
-          URL.revokeObjectURL(url);
-        } }, '이 문서 JSON 다운로드'),
-        el('a', { href: api.exportGoldenXlsxUrl(bundleId, docId), class: 'btn btn-ghost', style: 'display:flex;width:100%;border-radius:0;justify-content:flex-start' }, '이 문서 Excel 다운로드'),
-      ]),
+    return menuButton('내보내기', [
+      el('button', { onclick: () => {
+        const g = (editor && editor.getGoldenObject()) || doc.golden;
+        if (!g) { toast('Golden Set이 없습니다.', 'error'); return; }
+        const blob = new Blob([JSON.stringify(g, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = el('a', { href: url, download: `${docId}.json` });
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      } }, [el('b', {}, 'Golden JSON'), el('span', {}, '이 문서의 정답지')]),
+      el('a', { href: api.exportGoldenXlsxUrl(bundleId, docId) }, [el('b', {}, 'Excel'), el('span', {}, '이 문서의 비교·채점 결과')]),
     ]);
-    return menu;
   }
 
   function build() {
@@ -162,16 +154,15 @@ export function renderDetail(root, bundleId, docId) {
       onchange: (e) => { api.putReview(bundleId, docId, e.target.checked ? 'done' : '').then(() => { doc.review = e.target.checked ? 'done' : ''; toast('검수 상태를 변경했습니다.'); }).catch((err) => toast(err.message, 'error')); } });
 
     const topbar = el('div', { class: 'topbar detail-topbar' }, [
-      el('a', { class: 'brand', href: `#/b/${encodeURIComponent(bundleId)}` }, '← 목록'),
-      el('div', { class: 'sep' }),
-      el('div', { class: 'title' }, doc.id),
+      el('a', { class: 'back', href: `#/b/${encodeURIComponent(bundleId)}` }, [icon('left'), '목록']),
       el('div', { class: 'nav-group' }, [
-        el('button', { class: 'btn btn-sm', disabled: !doc.prev, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.prev)}`) }, '◀ Prev'),
-        el('button', { class: 'btn btn-sm', disabled: !doc.next, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.next)}`) }, 'Next ▶'),
+        el('button', { class: 'btn btn-icon', disabled: !doc.prev, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.prev)}`), title: '이전 문서 (←)', 'aria-label': '이전 문서' }, icon('left')),
+        el('button', { class: 'btn btn-icon', disabled: !doc.next, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.next)}`), title: '다음 문서 (→)', 'aria-label': '다음 문서' }, icon('right')),
       ]),
+      el('div', { class: 'title' }, [doc.id, doc.golden && doc.golden.documents && doc.golden.documents[0] && doc.golden.documents[0].doc_type ? el('small', {}, doc.golden.documents[0].doc_type) : null]),
       el('div', { class: 'grow' }),
       saveStateEl,
-      el('button', { class: 'btn btn-primary btn-sm', onclick: () => editor && editor.save() }, 'Save'),
+      el('button', { class: 'btn btn-primary btn-sm', title: 'Ctrl+S', onclick: () => editor && editor.save() }, '저장'),
       el('label', { class: 'review-toggle' }, [reviewInput, '검수 완료']),
       exportMenu(),
       el('button', { class: 'btn btn-ghost btn-icon', title: '단축키 (?)', onclick: openHelp }, '?'),
@@ -179,8 +170,8 @@ export function renderDetail(root, bundleId, docId) {
 
     // --- 좌측: 이미지 뷰어 ---
     const viewToggle = el('div', { class: 'toggle-group' }, [
-      (viewToggleBtns.original = el('button', { class: state.view === 'original' ? 'active' : '', disabled: !doc.has.original, onclick: () => { state.view = 'original'; state.page = 1; loadImage(); refreshToggle(); } }, 'Original')),
-      (viewToggleBtns.preprocessed = el('button', { class: state.view === 'preprocessed' ? 'active' : '', disabled: !doc.has.preprocessed, onclick: () => { state.view = 'preprocessed'; state.page = 1; loadImage(); refreshToggle(); } }, 'Preprocessed')),
+      (viewToggleBtns.original = el('button', { class: state.view === 'original' ? 'active' : '', disabled: !doc.has.original, onclick: () => { state.view = 'original'; state.page = 1; loadImage(); refreshToggle(); } }, '원본')),
+      (viewToggleBtns.preprocessed = el('button', { class: state.view === 'preprocessed' ? 'active' : '', disabled: !doc.has.preprocessed, onclick: () => { state.view = 'preprocessed'; state.page = 1; loadImage(); refreshToggle(); } }, '전처리')),
     ]);
     function refreshToggle() { viewToggleBtns.original.classList.toggle('active', state.view === 'original'); viewToggleBtns.preprocessed.classList.toggle('active', state.view === 'preprocessed'); }
 

@@ -1,4 +1,4 @@
-import { el, clear, debounce, toast, statusLabel } from './util.js';
+import { el, clear, debounce, toast, statusLabel, icon } from './util.js';
 import { api } from './api.js';
 import { cellDisplay } from './reconstruct.js';
 
@@ -108,7 +108,7 @@ export function createGoldenEditor(host, opts) {
         el('div', { class: 'grow' }),
         el('label', { class: 'autosave-row', style: 'padding:0' }, [
           el('input', { type: 'checkbox', checked: autosave, onchange: (e) => { autosave = e.target.checked; if (autosave && dirty) debouncedSave(); } }),
-          '켜짐 (1.5초 · Ctrl+S)',
+          '1.5초 뒤 자동 저장',
         ]),
         el('button', { class: `btn btn-sm ${advanced ? 'btn-primary' : ''}`, onclick: () => { advanced = !advanced; render(); } }, 'Raw JSON'),
         el('button', { class: 'btn btn-sm btn-danger', onclick: onDeleteGolden }, 'Golden 삭제'),
@@ -188,7 +188,7 @@ export function createGoldenEditor(host, opts) {
         el('input', { type: 'text', value: cell.value == null ? '' : cell.value, oninput: (e) => { cell.value = e.target.value; markDirty(); } })),
       el('select', { onchange: (e) => { cell.dtype = e.target.value; markDirty(); } },
         DTYPES.map((t) => el('option', { value: t, selected: t === cell.dtype }, t))),
-      el('button', { class: 'btn btn-ghost btn-icon btn-danger', title: '삭제', onclick: () => onDelete() }, '✕'),
+      el('button', { class: 'btn btn-ghost btn-icon btn-danger', title: '삭제', onclick: () => onDelete() }, icon('x')),
     ]);
     return row;
   }
@@ -217,9 +217,9 @@ export function createGoldenEditor(host, opts) {
       fieldsHost.appendChild(el('button', { class: 'btn btn-sm btn-ghost', onclick: () => { g.fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); } }, '+ Add Field'));
       body.appendChild(el('div', { class: 'group-block' }, [
         el('div', { class: 'group-head' }, [
-          el('span', { class: 'chev', onclick: () => { collapsed ? collapsedGroups.delete(gi) : collapsedGroups.add(gi); render(); } }, collapsed ? '▶' : '▼'),
+          el('span', { class: 'chev', onclick: () => { collapsed ? collapsedGroups.delete(gi) : collapsedGroups.add(gi); render(); } }, icon(collapsed ? 'right' : 'down')),
           el('input', { type: 'text', value: g.key, oninput: (e) => { g.key = e.target.value; markDirty(); } }),
-          el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { d0.extracted_groups.splice(gi, 1); markDirty(); render(); } }, '✕'),
+          el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { d0.extracted_groups.splice(gi, 1); markDirty(); render(); } }, icon('x')),
         ]),
         fieldsHost,
       ]));
@@ -253,12 +253,12 @@ export function createGoldenEditor(host, opts) {
           return el('td', tipHandlers(path), el('input', { type: 'text', value: cell.value == null ? '' : cell.value,
             oninput: (e) => { cell.value = e.target.value; markDirty(); } }));
         }),
-        el('td', {}, el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { t.rows.splice(ri, 1); markDirty(); render(); } }, '✕')),
+        el('td', {}, el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { t.rows.splice(ri, 1); markDirty(); render(); } }, icon('x'))),
       ])));
       body.appendChild(el('div', { class: 'table-block' }, [
         el('div', { class: 'table-head-row' }, [
           el('input', { type: 'text', value: t.key, oninput: (e) => { t.key = e.target.value; markDirty(); } }),
-          el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { d0.extracted_tables.splice(ti, 1); markDirty(); render(); } }, '✕'),
+          el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { d0.extracted_tables.splice(ti, 1); markDirty(); render(); } }, icon('x')),
         ]),
         el('div', { class: 'gs-table-wrap' }, el('table', { class: 'gs-table' }, [el('thead', {}, headRow), tbody])),
         el('div', { class: 'gs-table-actions' }, [

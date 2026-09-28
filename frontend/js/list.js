@@ -1,31 +1,11 @@
-import { el, mount, clear, fmtPct } from './util.js';
+import { el, mount, clear, fmtPct, scoreCard, icon, menuButton } from './util.js';
 import { api } from './api.js';
 import { navigate } from './router.js';
 
-const STATUS_KEYS = ['MATCH', 'MISMATCH', 'MISSING', 'EXTRA', 'TYPE_MISMATCH'];
-const STATUS_COLOR = { MATCH: 'var(--ok)', MISMATCH: 'var(--bad)', MISSING: 'var(--warn)', EXTRA: 'var(--extra)', TYPE_MISMATCH: 'var(--type)' };
-
-function scoreCard(title, score) {
-  if (!score) return el('div', { class: 'score-card' }, [el('div', { class: 'sc-head' }, [el('span', { class: 'sc-name' }, title), el('span', { class: 'sc-acc' }, '—')]), el('div', { class: 'hint' }, 'Golden 필요')]);
-  const total = score.total || 0;
-  const bar = el('div', { class: 'score-bar' });
-  if (total) {
-    for (const k of STATUS_KEYS) {
-      const n = score[k] || 0;
-      if (!n) continue;
-      bar.appendChild(el('span', { style: `width:${(n / total) * 100}%;background:${STATUS_COLOR[k]}`, title: `${k} ${n}` }));
-    }
-  }
-  return el('div', { class: 'score-card' }, [
-    el('div', { class: 'sc-head' }, [el('span', { class: 'sc-name' }, title), el('span', { class: 'sc-acc' }, fmtPct(score.accuracy))]),
-    bar,
-  ]);
-}
-
 function docBadges(has) {
-  const order = [['original', 'O'], ['preprocessed', 'P'], ['ao_extract', 'AO'], ['harness', 'H'], ['golden', 'G']];
+  const order = [['original', '원본'], ['preprocessed', '전처리'], ['ao_extract', 'AO'], ['harness', 'Harness'], ['golden', 'Golden']];
   return el('div', { class: 'doc-badges' }, order.map(([k, label]) =>
-    el('span', { class: `mini-badge ${has[k] ? 'on' : 'off'}`, title: `${label}: ${has[k] ? '있음' : '없음'}` }, label)));
+    el('span', { class: `mini-badge ${has[k] ? 'on' : 'off'}`, title: `${label} ${has[k] ? '있음' : '없음'}` }, label)));
 }
 
 function accBars(score) {
@@ -39,8 +19,8 @@ function accBars(score) {
 }
 
 function reviewBadge(review) {
-  if (review === 'done') return el('span', { class: 'badge badge-ok doc-review' }, '완료');
-  if (review === 'progress') return el('span', { class: 'badge badge-warn doc-review' }, '진행중');
+  if (review === 'done') return el('span', { class: 'doc-review done' }, [icon('check'), '검수 완료']);
+  if (review === 'progress') return el('span', { class: 'doc-review' }, '검수 중');
   return null;
 }
 
@@ -106,25 +86,17 @@ export function renderList(root, bundleId) {
       ...defs.map(([key, label, n]) => el('button', { class: `chip ${state.filter === key ? 'active' : ''}`,
         onclick: () => { state.filter = key; draw(); } }, [label, el('span', { class: 'n' }, String(n))])),
       el('div', { class: 'view-toggle' }, [
-        el('button', { class: state.view === 'grid' ? 'active' : '', onclick: () => { state.view = 'grid'; draw(); }, title: 'Grid' }, '▦'),
-        el('button', { class: state.view === 'list' ? 'active' : '', onclick: () => { state.view = 'list'; draw(); }, title: 'List' }, '☰'),
+        el('button', { class: state.view === 'grid' ? 'active' : '', onclick: () => { state.view = 'grid'; draw(); }, title: '썸네일', 'aria-label': '썸네일 보기' }, icon('grid')),
+        el('button', { class: state.view === 'list' ? 'active' : '', onclick: () => { state.view = 'list'; draw(); }, title: '목록', 'aria-label': '목록 보기' }, icon('list')),
       ]),
     ]);
   }
 
   function exportMenu() {
-    const menu = el('div', { class: 'chip', style: 'position:relative;cursor:pointer', onclick: (e) => {
-      e.stopPropagation();
-      const pop = e.currentTarget.querySelector('.export-pop');
-      pop.style.display = pop.style.display === 'block' ? 'none' : 'block';
-    } }, [
-      'Export ▾',
-      el('div', { class: 'export-pop', style: 'display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;box-shadow:var(--shadow-pop);z-index:50;min-width:160px' }, [
-        el('a', { href: api.exportGoldenZipUrl(bundleId), class: 'btn btn-ghost', style: 'display:flex;width:100%;border-radius:0;justify-content:flex-start' }, 'Golden ZIP'),
-        el('a', { href: api.exportGoldenXlsxUrl(bundleId), class: 'btn btn-ghost', style: 'display:flex;width:100%;border-radius:0;justify-content:flex-start' }, 'Excel'),
-      ]),
+    return menuButton('내보내기', [
+      el('a', { href: api.exportGoldenXlsxUrl(bundleId) }, [el('b', {}, 'Excel'), el('span', {}, '요약·필드·표·비교 시트')]),
+      el('a', { href: api.exportGoldenZipUrl(bundleId) }, [el('b', {}, 'Golden ZIP'), el('span', {}, '정답지 JSON 전체')]),
     ]);
-    return menu;
   }
 
   function draw() {
@@ -136,31 +108,40 @@ export function renderList(root, bundleId) {
       el('div', { class: 'sep' }),
       el('div', { class: 'title' }, b.name || b.id),
       el('div', { class: 'grow' }),
-      el('div', { class: 'search-box' }, [
-        '🔍',
-        el('input', { type: 'search', placeholder: '문서 ID·유형 검색', value: state.q,
+      el('label', { class: 'search-box' }, [
+        icon('search'),
+        el('input', { type: 'search', placeholder: '문서 ID나 유형으로 찾기', value: state.q,
           oninput: (e) => { state.q = e.target.value; drawGrid(); } }),
       ]),
       exportMenu(),
     ]);
 
     const summary = b.summary;
-    const summaryBar = el('div', { class: 'summary-bar' }, [
-      el('div', { class: 'summary-stat' }, [el('span', { class: 'v' }, String(summary.docs)), el('span', { class: 'l' }, '전체 문서')]),
-      el('div', { class: 'summary-stat' }, [el('span', { class: 'v' }, String(summary.golden)), el('span', { class: 'l' }, 'Golden 있음')]),
-      el('div', { class: 'summary-stat' }, [el('span', { class: 'v' }, String(summary.reviewed)), el('span', { class: 'l' }, '검수 완료')]),
-      el('div', { class: 'summary-stat' }, [el('span', { class: 'v' }, String(summary.missing)), el('span', { class: 'l' }, '데이터 누락')]),
-      el('div', { class: 'summary-stat' }, [el('span', { class: 'v' }, String(summary.error)), el('span', { class: 'l' }, '오류')]),
+    const sc = summary.score || {};
+    const delta = sc.ao && sc.harness && sc.ao.accuracy != null && sc.harness.accuracy != null
+      ? (sc.harness.accuracy - sc.ao.accuracy) * 100 : null;
+    const stat = (v, l) => el('div', { class: 'ov-stat' }, [el('b', {}, String(v)), el('span', {}, l)]);
+    const overview = el('section', { class: 'overview' }, [
+      el('div', { class: 'ov-progress' }, [
+        el('h1', {}, [String(summary.reviewed), el('small', {}, ` / ${summary.docs} 검수 완료`)]),
+        el('div', { class: 'ov-track' }, el('span', { style: `width:${summary.docs ? (summary.reviewed / summary.docs) * 100 : 0}%` })),
+        el('div', { class: 'ov-stats' }, [stat(summary.golden, 'Golden 있음'), stat(summary.missing, '데이터 누락'), stat(summary.error, '오류')]),
+      ]),
+      el('div', { class: 'ov-scores' }, [
+        scoreCard('AO Extract', sc.ao),
+        el('div', { class: `ov-delta ${delta == null ? '' : delta >= 0 ? 'up' : 'down'}` }, delta == null ? '—'
+          : [el('b', {}, `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}p`), el('span', {}, 'Harness 보정')]),
+        scoreCard('Harness', sc.harness),
+      ]),
     ]);
-    const scoreCards = el('div', { class: 'score-cards' }, [scoreCard('AO Extract', summary.score && summary.score.ao), scoreCard('Harness', summary.score && summary.score.harness)]);
 
     const gridHost = el('div');
-    mount(screen, [topbar, summaryBar, scoreCards, chips(summary), gridHost]);
+    mount(screen, [topbar, el('div', { class: 'list-body' }, [overview, chips(summary), gridHost])]);
     drawGrid();
 
     function drawGrid() {
       const docs = filteredDocs();
-      if (!docs.length) { mount(gridHost, el('div', { class: 'empty-state' }, '조건에 맞는 문서가 없습니다.')); return; }
+      if (!docs.length) { mount(gridHost, el('div', { class: 'empty-state' }, '조건에 맞는 문서가 없습니다. 필터나 검색어를 바꿔 보세요.')); return; }
       if (state.view === 'grid') {
         mount(gridHost, el('div', { class: 'doc-grid' }, docs.map((d) => {
           const card = el('div', { class: 'doc-card', onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(d.id)}`) }, [
@@ -168,7 +149,9 @@ export function renderList(root, bundleId) {
             reviewBadge(d.review),
             el('div', { class: 'doc-info' }, [
               el('div', { class: 'doc-id' }, d.id),
+              el('div', { class: 'doc-type' }, d.doc_type || '문서 유형 없음'),
               docBadges(d.has),
+              d.errors && d.errors.length ? el('div', { class: 'doc-err', title: d.errors.join('\n') }, `읽지 못한 파일 ${d.errors.length}개`) : null,
               accBars(d.score),
             ]),
           ]);
