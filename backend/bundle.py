@@ -55,11 +55,11 @@ def classify(relpath: str) -> str | None:
     name = parts.name
     if name.startswith(".") or any(p == "__MACOSX" for p in parts.parts):
         return None
+    low = name.lower()
     dirs = [p.lower() for p in parts.parts[:-1]]
     for kind in _KIND_ORDER:
         if any(d in _FOLDER_KEYS[kind] for d in dirs):
             return kind
-    low = name.lower()
     for kind, suffixes in _SUFFIX_KEYS.items():
         if any(low.endswith(s) for s in suffixes):
             return kind
@@ -173,6 +173,12 @@ def process_upload(data_dir: Path, files: list[tuple[str, bytes]], name: str | N
         bundle_name = name or (PurePosixPath(files[0][0]).parts[0] if files and len(files[0][0].split("/")) > 1
                                 else "bundle")
 
+    kinds = {classify(relpath) for relpath, _ in entries}
+    if not kinds.intersection(DOC_KINDS):
+        if "ao_ui" in kinds:
+            raise ApiError(400, "AO UI sidecar만으로는 문서를 만들 수 없습니다. 원본 이미지 또는 AO 추출 JSON을 함께 업로드하세요.")
+        raise ApiError(400, "업로드에서 인식 가능한 문서 파일을 찾지 못했습니다.")
+
     bid = new_bundle_id()
     bdir = bundle_dir(data_dir, bid)
     bdir.mkdir(parents=True, exist_ok=True)
@@ -242,6 +248,72 @@ def load_json_safe(path: Path | None) -> tuple[dict | None, str | None]:
         return None, f"read error: {e}"
 
 
+def _ao_cell(cell: dict, prefix: str = "") -> dict:
+    out = {k: v for k, v in cell.items() if k != "token_bbox"}
+    key = out.get("key", "")
+    if prefix and isinstance(key, str) and key.startswith(prefix):
+        key = key[len(prefix):]
+        if key.startswith("."):
+            key = key[1:]
+        out["key"] = key
+    boxes = []
+    for region in cell.get("token_bbox") or []:
+        if not isinstance(region, dict):
+            continue
+        for box in region.get("token_bbox") or []:
+            if isinstance(box, list) and len(box) == 4:
+                boxes.append({"page": region.get("page", 1), "box": box})
+    if boxes:
+        out["bbox"] = boxes
+    return out
+
+
+def canonical_ao(data: dict | None) -> dict | None:
+    """AO UI response → canonical extracted_* schema; upload file remains unchanged."""
+    if not isinstance(data, dict) or not isinstance(data.get("documents"), list):
+        return data
+    docs = []
+    converted = False
+    for source in data["documents"]:
+        result = source.get("result") if isinstance(source, dict) else None
+        if not isinstance(result, dict) or not any(k in result for k in ("fields", "groups", "tables")):
+            docs.append(source)
+            continue
+        converted = True
+        groups = []
+        for group in result.get("groups") or []:
+            key = group.get("key", "")
+            prefix = f"{key}." if key else ""
+            groups.append({**group, "fields": [_ao_cell(c, prefix) for c in group.get("fields") or []]})
+        tables = []
+        for table in result.get("tables") or []:
+            key = table.get("key", "")
+            rows = []
+            for row in table.get("rows") or []:
+                cells = []
+                for cell in row:
+                    prefix = f"{key}["
+                    normalized = _ao_cell(cell, prefix)
+                    cell_key = normalized.get("key", "")
+                    if isinstance(cell_key, str) and "]." in cell_key:
+                        normalized["key"] = cell_key.split("].", 1)[1]
+                    cells.append(normalized)
+                rows.append(cells)
+            tables.append({**table, "rows": rows})
+        docs.append({
+            "doc_type": result.get("doc_type") or result.get("document_type") or source.get("doc_type", ""),
+            "extracted_fields": [_ao_cell(c) for c in result.get("fields") or []],
+            "extracted_groups": groups,
+            "extracted_tables": tables,
+        })
+    return {**data, "documents": docs} if converted else data
+
+
+def load_ao_extract(path: Path | None) -> tuple[dict | None, str | None]:
+    data, err = load_json_safe(path)
+    return canonical_ao(data), err
+
+
 def page_count(path: Path) -> int:
     if path.suffix.lower() not in (".tif", ".tiff"):
         return 1
@@ -271,11 +343,12 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     state = load_state(bdir)
     paths = {k: find_kind_file(bdir, k, doc_id) for k in DOC_KINDS}
     has = {k: paths[k] is not None for k in DOC_KINDS}
+    has["ao_ui"] = find_kind_file(bdir, "ao_ui", doc_id) is not None
 
     errors = []
     parsed: dict[str, dict | None] = {}
     for k in CORE_JSON_KINDS:
-        data, err = load_json_safe(paths[k])
+        data, err = load_ao_extract(paths[k]) if k == "ao_extract" else load_json_safe(paths[k])
         parsed[k] = data
         if err:
             errors.append(f"{k}: {err}")
@@ -320,7 +393,7 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
         errors = []
         parsed: dict[str, dict | None] = {}
         for k in CORE_JSON_KINDS:
-            data, err = load_json_safe(paths[k])
+            data, err = load_ao_extract(paths[k]) if k == "ao_extract" else load_json_safe(paths[k])
             parsed[k] = data
             if err:
                 errors.append(f"{k}: {err}")
@@ -457,7 +530,7 @@ def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str) -> d
         data = copy.deepcopy(EMPTY_GOLDEN)
     elif source == "ao":
         apath = find_kind_file(bdir, "ao_extract", doc_id)
-        data, err = load_json_safe(apath)
+        data, err = load_ao_extract(apath)
         if data is None:
             raise ApiError(404, f"ao_extract not available: {err or 'missing'}")
         data = copy.deepcopy(data)

@@ -8,7 +8,7 @@ import { renderCompare } from './compare.js';
 import { buildReconModel, renderReconHTML, buildMarkdown, renderMarkdownToDom } from './reconstruct.js';
 import { createDocumentRail } from './documentRail.js';
 
-const RAW_KIND = { golden: 'golden', ao: 'ao_extract', harness: 'harness' };
+const RAW_KIND = { golden: 'golden', ao: 'ao_extract', harness: 'harness', ao_ui: 'ao_ui' };
 
 export function renderDetail(root, bundleId, docId) {
   const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1 };
@@ -320,29 +320,30 @@ export function renderDetail(root, bundleId, docId) {
   function buildRawTab() {
     const viewerHost = el('div', { class: 'json-viewer' });
     const jsonViewer = createJsonViewer(viewerHost);
-    const sel = { golden: el('button', { class: 'active' }, 'Golden'), ao: el('button', {}, 'AO Extract'), harness: el('button', {}, 'Harness') };
-    let current = 'golden';
+    const sourceLabels = { golden: 'Golden', ao: 'AO Extract', harness: 'Harness', ao_ui: 'AO UI' };
+    const sel = Object.fromEntries(Object.entries(sourceLabels)
+      .filter(([key]) => key !== 'ao_ui' || doc.has.ao_ui)
+      .map(([key, label]) => [key, el('button', { disabled: !doc.has[RAW_KIND[key]] }, label)]));
+    let current = Object.keys(sel).find((key) => doc.has[RAW_KIND[key]]) || 'golden';
     function load(kind) {
       current = kind;
       for (const k in sel) sel[k].classList.toggle('active', k === kind);
-      if (!doc.has[RAW_KIND[kind]]) { jsonViewer.show(JSON.stringify('(파일 없음)')); return; }
+      if (!doc.has[RAW_KIND[kind]]) { jsonViewer.show(JSON.stringify(`${sourceLabels[kind]} 파일 없음`)); return; }
       jsonViewer.show(JSON.stringify('불러오는 중…'));
       api.getRaw(bundleId, docId, RAW_KIND[kind]).then((text) => {
         if (kind !== current) return;
         try { jsonViewer.show(JSON.stringify(JSON.parse(text), null, 2)); } catch (e) { jsonViewer.show(text); }
-      }).catch(() => { if (kind === current) jsonViewer.show(JSON.stringify('(파일 없음)')); });
+      }).catch(() => { if (kind === current) jsonViewer.show(JSON.stringify(`${sourceLabels[kind]} 파일을 불러오지 못했습니다.`)); });
     }
-    sel.golden.addEventListener('click', () => load('golden'));
-    sel.ao.addEventListener('click', () => load('ao'));
-    sel.harness.addEventListener('click', () => load('harness'));
+    for (const [key, button] of Object.entries(sel)) button.addEventListener('click', () => load(key));
     const copyBtn = el('button', { class: 'btn btn-sm', onclick: () => {
       navigator.clipboard && navigator.clipboard.writeText(jsonViewer.getText()).then(() => toast('복사했습니다.')).catch(() => toast('복사 실패', 'error'));
     } }, '복사');
     mount(tabHosts.raw, el('div', { class: 'raw-json-panel' }, [
-      el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'toggle-group' }, [sel.golden, sel.ao, sel.harness]), el('div', { class: 'grow' }), copyBtn]),
+      el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'toggle-group' }, Object.values(sel)), el('div', { class: 'grow' }), copyBtn]),
       viewerHost,
     ]));
-    load('golden');
+    load(current);
   }
 
   return () => {
