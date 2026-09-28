@@ -408,6 +408,17 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .bbox-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
 .bbox-rect { position: absolute; z-index: 1; box-sizing: border-box; background: var(--hl); mix-blend-mode: multiply; border: 2px solid var(--accent); outline: 1px solid var(--surface); outline-offset: 1px; border-radius: var(--r-sm); box-shadow: var(--shadow-pop); }
 .viewer-empty { display: grid; place-items: center; height: 100%; color: var(--ink-3); }
+.focus-mode-seg { margin-left: var(--sp-2); }
+.minimap {
+  position: absolute; right: var(--sp-3); bottom: var(--sp-3); z-index: 5; max-width: 160px; max-height: 200px;
+  overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop); opacity: 0; pointer-events: none; transition: opacity .15s; cursor: pointer;
+}
+.minimap.visible { opacity: 1; pointer-events: auto; }
+.minimap img { display: block; width: 100%; height: 100%; object-fit: fill; user-select: none; -webkit-user-drag: none; }
+.mm-boxes { position: absolute; inset: 0; }
+.mm-rect { position: absolute; box-sizing: border-box; border: 1px solid var(--accent); background: var(--accent-soft); }
+.mm-viewport { position: absolute; box-sizing: border-box; border: 2px solid var(--accent); background: var(--accent-soft); opacity: .6; }
 
 .tabs.panel-head { padding: 0 var(--sp-4); gap: var(--sp-1); }
 .tab-btn { position: relative; height: 44px; padding: 0 10px; border: 0; background: transparent; color: var(--ink-3); font-size: var(--fs-md); font-weight: 600; }
