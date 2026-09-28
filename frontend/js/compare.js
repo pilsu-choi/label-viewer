@@ -1,4 +1,4 @@
-import { el, clear, mount, charDiff, fmtPct, statusBadge, scoreCard, statusDescription, isMismatch } from './util.js';
+import { el, clear, mount, charDiff, fmtPct, statusBadge, scoreCard, statusDescription, isMismatch, icon, toast } from './util.js';
 
 // 필터 키 순서. 'mismatch_all' 은 탭 배지·사이드바·편집 탭 요약과 같은 isMismatch 기준.
 const FILTER_KEYS = ['all', 'mismatch_all', 'mismatch', 'missing', 'extra'];
@@ -23,40 +23,67 @@ function diffSpan(goldenVal, val) {
   return el('span', { class: 'cmp-val' }, parts.map((p) => p.changed ? el('span', { class: 'diff-add' }, p.text) : document.createTextNode(p.text)));
 }
 
+// 내부 경로(documents[0].groups[..].fields[..])를 사람이 읽는 위치로 바꾼다.
+function entryLocation(entry) {
+  const { area, container, row, key } = entry;
+  if (area === 'field') return `필드 › ${key}`;
+  if (area === 'group') return `${container} › ${key}`;
+  const rowLabel = typeof row === 'string' && row.startsWith('+')
+    ? `추가 행 ${Number(row.slice(1)) + 1}`
+    : `#${Number(row) + 1}`;
+  return `${container} › ${rowLabel} › ${key}`;
+}
+
 function evidencePopover(entry) {
   const box = el('div', { class: 'evidence-pop' });
+  box.appendChild(el('div', { class: 'ev-loc' }, entryLocation(entry)));
   const rows = [];
-  rows.push(el('div', { class: 'ev-row' }, [el('span', {}, '경로'), el('span', { class: 'mono' }, entry.path)]));
   if (entry.ao_confidence != null) rows.push(el('div', { class: 'ev-row' }, [el('span', {}, 'AO 신뢰도'), el('span', {}, fmtPct(entry.ao_confidence))]));
   box.appendChild(el('h5', {}, '근거'));
-  box.appendChild(el('div', {}, rows));
+  if (rows.length) box.appendChild(el('div', {}, rows));
   const ev = entry.evidence;
-  if (!ev) { box.appendChild(el('div', { class: 'hint', style: 'margin-top:8px' }, '하네스 근거 없음')); return box; }
-  const meta = [];
-  if (ev.tier) meta.push(['Tier', ev.tier]);
-  if (ev.correction_basis) meta.push(['보정 근거', ev.correction_basis]);
-  if (ev.decision_rule_no) meta.push(['결정 규칙', ev.decision_rule_no]);
-  if (ev.final_value != null) meta.push(['최종값', String(ev.final_value)]);
-  if (meta.length) box.appendChild(el('div', { style: 'margin-top:8px' }, meta.map(([k, v]) => el('div', { class: 'ev-row' }, [el('span', {}, k), el('span', {}, v)]))));
-  const evi = ev.evidence || {};
-  if (Array.isArray(evi.rule) && evi.rule.length) {
-    box.appendChild(el('h5', { style: 'margin-top:10px' }, '규칙 결과'));
-    box.appendChild(el('table', {}, [
-      el('thead', {}, el('tr', {}, ['결과', '규칙', '설명'].map((h) => el('th', {}, h)))),
-      el('tbody', {}, evi.rule.map((r) => el('tr', {}, [
-        el('td', {}, r.result || ''), el('td', {}, r.rule_id || ''), el('td', {}, r.detail || ''),
-      ]))),
-    ]));
+  if (!ev) {
+    box.appendChild(el('div', { class: 'hint', style: 'margin-top:8px' }, '하네스 근거 없음'));
+  } else {
+    const meta = [];
+    if (ev.tier) meta.push(['Tier', ev.tier]);
+    if (ev.correction_basis) meta.push(['보정 근거', ev.correction_basis]);
+    if (ev.decision_rule_no) meta.push(['결정 규칙', ev.decision_rule_no]);
+    if (ev.final_value != null) meta.push(['최종값', String(ev.final_value)]);
+    if (meta.length) box.appendChild(el('div', { style: 'margin-top:8px' }, meta.map(([k, v]) => el('div', { class: 'ev-row' }, [el('span', {}, k), el('span', {}, v)]))));
+    const evi = ev.evidence || {};
+    if (Array.isArray(evi.rule) && evi.rule.length) {
+      box.appendChild(el('h5', { style: 'margin-top:10px' }, '규칙 결과'));
+      box.appendChild(el('table', {}, [
+        el('thead', {}, el('tr', {}, ['결과', '규칙', '설명'].map((h) => el('th', {}, h)))),
+        el('tbody', {}, evi.rule.map((r) => el('tr', {}, [
+          el('td', {}, r.result || ''), el('td', {}, r.rule_id || ''), el('td', {}, r.detail || ''),
+        ]))),
+      ]));
+    }
+    if (evi.reread) {
+      box.appendChild(el('h5', { style: 'margin-top:10px' }, '재판독'));
+      box.appendChild(el('div', { class: 'ev-row' }, [el('span', {}, evi.reread.status || ''), el('span', {}, evi.reread.value == null ? '—' : String(evi.reread.value))]));
+      if (evi.reread.detail) box.appendChild(el('div', { class: 'hint' }, evi.reread.detail));
+    }
+    if (evi.master) {
+      box.appendChild(el('h5', { style: 'margin-top:10px' }, '마스터 대조'));
+      box.appendChild(el('div', { class: 'ev-row' }, [el('span', {}, '상태'), el('span', {}, evi.master.status || '')]));
+    }
   }
-  if (evi.reread) {
-    box.appendChild(el('h5', { style: 'margin-top:10px' }, '재판독'));
-    box.appendChild(el('div', { class: 'ev-row' }, [el('span', {}, evi.reread.status || ''), el('span', {}, evi.reread.value == null ? '—' : String(evi.reread.value))]));
-    if (evi.reread.detail) box.appendChild(el('div', { class: 'hint' }, evi.reread.detail));
-  }
-  if (evi.master) {
-    box.appendChild(el('h5', { style: 'margin-top:10px' }, '마스터 대조'));
-    box.appendChild(el('div', { class: 'ev-row' }, [el('span', {}, '상태'), el('span', {}, evi.master.status || '')]));
-  }
+  box.appendChild(el('details', { class: 'ev-detail' }, [
+    el('summary', {}, '상세'),
+    el('div', { class: 'ev-row' }, [
+      el('span', {}, '경로'),
+      el('span', { class: 'ev-path' }, [
+        el('span', { class: 'mono' }, entry.path),
+        el('button', {
+          class: 'btn ghost sm icon', title: '경로 복사', 'aria-label': '경로 복사',
+          onclick: () => { navigator.clipboard && navigator.clipboard.writeText(entry.path).then(() => toast('경로를 복사했습니다.')); },
+        }, icon('copy')),
+      ]),
+    ]),
+  ]));
   return box;
 }
 
@@ -84,16 +111,25 @@ function hidePop() {
   if (hoverBboxCb) { hoverBboxCb(null); hoverBboxCb = null; }
 }
 
-// 뷰포트 안에 들어오도록 위치를 잡는다: 오른쪽/아래로 넘치면 각각 왼쪽으로 접거나 위로 뒤집는다.
+// 호출 행(anchorRow)을 가리지 않도록 행 바로 위나 아래(가용 공간이 큰 쪽)에 둔다.
+// 수평은 커서 x 근처로 두되 뷰포트 안으로 클램프한다.
 function positionPop(x, y) {
   if (!popEl) return;
   const vw = window.innerWidth, vh = window.innerHeight;
   const r = popEl.getBoundingClientRect();
-  let left = Math.min(x + 14, vw - r.width - 8);
-  left = Math.max(8, left);
-  let top = y + 14;
-  if (top + r.height > vh - 8) top = y - r.height - 14;
-  top = Math.max(8, top);
+  const gap = 8;
+  const rowRect = anchorRow && anchorRow.getBoundingClientRect();
+  let top;
+  if (rowRect) {
+    const spaceBelow = vh - rowRect.bottom;
+    const spaceAbove = rowRect.top;
+    top = spaceBelow >= spaceAbove ? rowRect.bottom + gap : rowRect.top - gap - r.height;
+  } else {
+    top = y + 14;
+  }
+  top = Math.max(gap, Math.min(top, vh - r.height - gap));
+  let left = Math.min(x + 14, vw - r.width - gap);
+  left = Math.max(gap, left);
   popEl.style.left = `${left}px`;
   popEl.style.top = `${top}px`;
 }
@@ -105,8 +141,8 @@ function openPop(tr, entry, x, y, onHoverBbox) {
   popEl.addEventListener('mouseenter', clearHideTimer);
   popEl.addEventListener('mouseleave', () => { if (!pinned) scheduleHide(); });
   document.body.appendChild(popEl);
-  positionPop(x, y);
   anchorRow = tr;
+  positionPop(x, y);
   lastBbox = entry.bbox || null;
   hoverBboxCb = onHoverBbox || null;
   if (lastBbox && onHoverBbox) onHoverBbox(lastBbox);
