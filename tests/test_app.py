@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.app import create_app
 from backend.bundle import classify, stem_of
-from backend.doctype import DOC_TYPES, TEMPLATES, apply_template, canon
+from backend.doctype import DOC_TYPES, TEMPLATES, apply_template, canon, label
 from scripts import make_dummy_bundle as dummy
 
 
@@ -396,6 +396,7 @@ def _typed_bundle(client: TestClient) -> str:
 def test_canon_and_apply_template():
     assert canon("Y000701333") == "소견서" and canon(" 입원확인서 ") == "입퇴원확인서"
     assert canon("모름") == canon("") == canon(None) == ""
+    assert label("AC02922011") == "진료비영수증 (AC02922011)" and label("세부내역서") == "세부내역서" and label(None) == ""
     doc = {"extracted_fields": [{"key": "발행일", "value": "2024"}], "extracted_groups": [
         {"key": "환자정보", "fields": [{"key": "환자정보-성명", "value": "홍"}]}], "extracted_tables": [
         {"key": "항목내역", "headers": ["a"], "rows": [[{"key": "항목", "value": "주사"}, {"key": "zzz", "value": "1"}]]}]}

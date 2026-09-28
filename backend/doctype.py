@@ -6,9 +6,12 @@ import json
 from pathlib import Path
 
 DOC_TYPES = ["진료비영수증", "세부내역서", "약제비영수증", "진단서", "입퇴원확인서", "소견서", "수술확인서"]
-_ALIAS = {
+AO_CODES = {
     "AC02922011": "진료비영수증", "Y000707100": "세부내역서", "Y000707300": "약제비영수증",
     "Y000701200": "진단서", "Y000701300": "입퇴원확인서", "Y000701333": "소견서", "Y00071250": "수술확인서",
+}
+_ALIAS = {
+    **AO_CODES,
     "약제영수증": "약제비영수증", "입원확인서": "입퇴원확인서",
     "진료비세부산정내역서": "세부내역서", "진료비세부내역서": "세부내역서",
 }
@@ -21,6 +24,12 @@ def canon(value) -> str:
     v = str(value or "").strip()
     v = _ALIAS.get(v, v)
     return v if v in DOC_TYPES else ""
+
+
+def label(value) -> str:
+    """화면 표시용 문서 종류. AO 코드면 '진료비영수증 (AC02922011)'."""
+    v = str(value or "").strip()
+    return f"{AO_CODES[v]} ({v})" if v in AO_CODES else v
 
 
 def _first_type(data: dict | None) -> str:
