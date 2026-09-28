@@ -1,4 +1,4 @@
-import { el, mount, clear, fmtPct, scoreCard, icon, menuButton } from './util.js';
+import { el, mount, clear, fmtPct, scoreCard, icon, menuButton, mismatchBadge } from './util.js';
 import { api } from './api.js';
 import { navigate } from './router.js';
 
@@ -156,6 +156,7 @@ export function renderList(root, bundleId) {
             el('div', { class: 'doc-info' }, [
               el('div', { class: 'doc-info-head' }, [el('span', { class: 'doc-id' }, d.id), reviewBadge(d.review)]),
               el('div', { class: 'doc-type' }, d.doc_type || '문서 유형 없음'),
+              mismatchBadge(d.doc_type_mismatch),
               docBadges(d.has),
               d.errors && d.errors.length ? el('span', { class: 'badge badge-bad', title: d.errors.join('\n') }, `오류 ${d.errors.length}`) : null,
               accBars(d.score),
@@ -168,6 +169,7 @@ export function renderList(root, bundleId) {
           el('span', { class: 'doc-id' }, d.id),
           docBadges(d.has),
           el('span', { class: 'doc-type' }, d.doc_type || '—'),
+          mismatchBadge(d.doc_type_mismatch),
           reviewBadge(d.review),
         ]))));
       }

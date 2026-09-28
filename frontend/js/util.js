@@ -259,3 +259,7 @@ export function menuButton(label, items, iconName = 'download', extraClass = '')
     }
   } }, [icon(iconName), label || null, pop]);
 }
+
+export function mismatchBadge(m) {
+  return m ? el('span', { class: 'badge badge-warn', title: `AO: ${m.ao} → 제목: ${m.title}${m.title_line ? ` (${m.title_line})` : ''}` }, '양식 불일치') : null;
+}

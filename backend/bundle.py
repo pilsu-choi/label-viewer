@@ -332,6 +332,15 @@ def _doc_type_of(*jsons: dict | None) -> str:
     return ""
 
 
+def doc_type_mismatch(harness: dict | None) -> dict | None:
+    """Harness 재분류 결과 AO 양식과 제목 양식이 달라진 첫 문서를 반환한다."""
+    for d in (((harness or {}).get("harness") or {}).get("reclassification") or {}).get("documents") or []:
+        ao, title = d.get("ao_doc_type"), d.get("title_doc_type")
+        if d.get("action") in ("reextracted", "detected") and ao and title and ao != title:
+            return {"ao": ao, "title": title, "title_line": d.get("title_line") or "", "reason": d.get("reason") or ""}
+    return None
+
+
 def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     _safe_id(doc_id, "doc_id")
     bdir = bundle_dir(data_dir, bundle_id)
@@ -366,6 +375,7 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
         "errors": errors,
         "review": (state.get("review") or {}).get(doc_id, ""),
         "doc_type": _doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"]),
+        "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
         "pages": {
             "original": page_count(paths["original"]) if paths["original"] else 0,
             "preprocessed": page_count(paths["preprocessed"]) if paths["preprocessed"] else 0,
@@ -422,6 +432,7 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
         docs.append({
             "id": doc_id, "has": has, "errors": errors, "review": rv,
             "doc_type": _doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"]),
+            "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
             "score": sc, "mismatch": mismatch,
         })
 
