@@ -1,4 +1,4 @@
-import { el, clear, debounce, toast, statusLabel, icon } from './util.js';
+import { el, clear, debounce, toast, statusLabel, icon, menuButton } from './util.js';
 import { api } from './api.js';
 import { cellDisplay } from './reconstruct.js';
 
@@ -8,7 +8,7 @@ let tooltipEl = null;
 function showTip(x, y, entry) {
   hideTip();
   if (!entry) return;
-  tooltipEl = el('div', { class: 'tooltip-pop', style: `left:${Math.min(x + 12, window.innerWidth - 300)}px;top:${Math.min(y + 12, window.innerHeight - 130)}px` }, [
+  tooltipEl = el('div', { class: 'tooltip', style: `left:${Math.min(x + 12, window.innerWidth - 300)}px;top:${Math.max(8, y - 68)}px` }, [
     el('div', {}, [el('b', {}, 'AO'), entry.ao === '' || entry.ao == null ? '—' : String(entry.ao), entry.ao_status ? ` (${statusLabel(entry.ao_status)})` : '']),
     el('div', {}, [el('b', {}, 'Harness'), entry.harness === '' || entry.harness == null ? '—' : String(entry.harness), entry.harness_status ? ` (${statusLabel(entry.harness_status)})` : '']),
     entry.evidence && entry.evidence.correction_basis ? el('div', { class: 'gs-tip-evidence' }, `근거 · ${entry.evidence.correction_basis}`) : null,
@@ -104,17 +104,17 @@ export function createGoldenEditor(host, opts) {
     if (!doc.golden) { host.appendChild(renderCreateCard()); return; }
     if (golden == null) golden = JSON.parse(JSON.stringify(doc.golden));
     const extraDocs = (golden.documents || []).length - 1;
-    host.appendChild(el('div', { class: 'section-block' }, [
-      el('div', { class: 'section-head' }, [
-        el('h4', {}, '자동 저장'),
-        el('div', { class: 'grow' }),
-        el('label', { class: 'autosave-row', style: 'padding:0' }, [
-          el('input', { type: 'checkbox', checked: autosave, onchange: (e) => { autosave = e.target.checked; if (autosave && dirty) debouncedSave(); } }),
-          '1.5초 뒤 자동 저장',
-        ]),
-        el('button', { class: `btn btn-sm ${advanced ? 'btn-primary' : ''}`, onclick: () => { advanced = !advanced; render(); } }, 'Raw JSON'),
-        el('button', { class: 'btn btn-sm btn-danger', onclick: onDeleteGolden }, 'Golden 삭제'),
+    host.appendChild(el('div', { class: 'gs-subtoolbar' }, [
+      el('label', { class: 'switch' }, [
+        el('input', { type: 'checkbox', checked: autosave, onchange: (e) => { autosave = e.target.checked; if (autosave && dirty) debouncedSave(); } }),
+        '자동 저장',
       ]),
+      el('span', { class: 'hint' }, '1.5초 뒤 저장'),
+      el('div', { class: 'grow' }),
+      menuButton('', [
+        el('button', { onclick: () => { advanced = !advanced; render(); } }, advanced ? '폼으로 돌아가기' : 'JSON 보기'),
+        el('button', { class: 'danger', onclick: onDeleteGolden }, 'Golden 삭제'),
+      ], 'more-horizontal', 'ghost icon sm'),
     ]));
 
     if (advanced) { host.appendChild(renderAdvanced()); return; }
@@ -144,9 +144,9 @@ export function createGoldenEditor(host, opts) {
 
   function renderCreateCard() {
     const sources = [
-      ['ao', 'From AO Extract', doc.has.ao_extract],
-      ['harness', 'From Harness', doc.has.harness],
-      ['empty', 'Empty', true],
+      ['ao', 'AO 결과에서', doc.has.ao_extract],
+      ['harness', 'Harness 결과에서', doc.has.harness],
+      ['empty', '빈 Golden', true],
     ];
     let chosen = sources.find((s) => s[2])[0];
     const card = el('div', { class: 'gs-create-card' }, [
@@ -158,21 +158,19 @@ export function createGoldenEditor(host, opts) {
       const row = el('label', { class: `gs-source-opt ${enabled ? '' : 'disabled'}` }, [
         el('input', { type: 'radio', name: 'gs-src', value: key, checked: key === chosen, disabled: !enabled,
           onchange: () => { chosen = key; } }),
-        el('div', {}, [
-          el('div', { class: 'opt-label' }, label),
-          el('div', { class: 'opt-sub' }, enabled ? '' : '원본 없음'),
-        ]),
+        el('div', { class: 'grow' }, [el('div', { class: 'opt-label' }, label)]),
+        enabled ? null : el('span', { class: 'badge badge-muted' }, '파일 없음'),
       ]);
       optsHost.appendChild(row);
     });
     card.appendChild(optsHost);
-    card.appendChild(el('button', { class: 'btn btn-primary', style: 'width:100%;margin-top:6px', onclick: () => {
+    card.appendChild(el('button', { class: 'btn primary', onclick: () => {
       api.createGolden(bundleId, docId, chosen).then((res) => {
         doc = res; golden = null; cmap = compareMap(doc.compare);
         render(); toast('Golden Set을 생성했습니다.');
         opts.onGoldenCreated && opts.onGoldenCreated(res);
       }).catch((e) => toast(`생성 실패: ${e.message}`, 'error'));
-    } }, 'Create Golden Set'));
+    } }, 'Golden 만들기'));
     return card;
   }
 
@@ -188,7 +186,7 @@ export function createGoldenEditor(host, opts) {
   function tipHandlers(path) {
     return {
       onmouseenter: (e) => { const entry = cmap.get(path); showTip(e.clientX, e.clientY, entry); if (entry && entry.bbox && opts.onHoverBbox) opts.onHoverBbox(entry.bbox); },
-      onmousemove: (e) => { if (tooltipEl) { tooltipEl.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 300)}px`; tooltipEl.style.top = `${Math.min(e.clientY + 12, window.innerHeight - 130)}px`; } },
+      onmousemove: (e) => { if (tooltipEl) { tooltipEl.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 300)}px`; tooltipEl.style.top = `${Math.max(8, e.clientY - 68)}px`; } },
       onmouseleave: () => { hideTip(); if (opts.onHoverBbox) opts.onHoverBbox(null); },
     };
   }
@@ -202,26 +200,42 @@ export function createGoldenEditor(host, opts) {
         el('input', { type: 'text', value: cell.value == null ? '' : cell.value, oninput: (e) => { cell.value = e.target.value; markDirty(); } })),
       el('select', { onchange: (e) => { cell.dtype = e.target.value; markDirty(); } },
         DTYPES.map((t) => el('option', { value: t, selected: t === cell.dtype }, t))),
-      el('button', { class: 'btn btn-ghost btn-icon btn-danger', title: '삭제', onclick: () => onDelete() }, icon('x')),
+      el('button', { class: 'field-row-del', title: '삭제', 'aria-label': '삭제', onclick: () => onDelete() }, icon('x')),
     ]);
     if (entry) {
       const sources = [['AO', entry.ao, entry.ao_status], ['Harness', entry.harness, entry.harness_status]];
       row.classList.add('has-sources');
-      row.appendChild(el('div', { class: 'gs-source-strip', ...tipHandlers(path) }, sources.map(([label, value, status]) => {
+      row.appendChild(el('div', { class: 'gs-compare', ...tipHandlers(path) }, sources.map(([label, value, status]) => {
         const available = value != null && value !== '';
+        const off = status && status !== 'MATCH';
         return el('button', {
-          class: `gs-source-item ${status && status !== 'MATCH' ? 'is-off' : ''}`,
+          class: `gs-chip ${off ? 'is-off' : ''}`,
           type: 'button', disabled: !available,
           title: available ? `${label} 값을 Golden에 채택` : `${label} 값 없음`,
           onclick: () => { applyAdopt(golden, entry, value); markDirty(); render(); },
         }, [
-          el('span', { class: 'gs-source-label' }, label),
-          el('span', { class: 'gs-source-value' }, available ? String(value) : '—'),
-          status && status !== 'MATCH' ? el('span', { class: 'gs-source-status' }, statusLabel(status)) : null,
+          el('span', { class: 'cap' }, label),
+          el('span', { class: 'val' }, available ? String(value) : '—'),
+          off ? el('span', { class: 'stat' }, statusLabel(status)) : null,
         ]);
       })));
     }
     return row;
+  }
+
+  // 섹션 헤더: fs-xs 라벨 + 개수 + 우측 ghost sm 추가 버튼. 빈 섹션은 한 줄로 축소한다.
+  function sectionShell(label, count, addLabel, onAdd, body) {
+    if (!count) return el('div', { class: 'section-block' }, el('div', { class: 'section-empty' }, [
+      `${label}이 없습니다`, el('button', { class: 'btn ghost sm', onclick: onAdd }, [icon('plus'), addLabel]),
+    ]));
+    return el('div', { class: 'section-block' }, [
+      el('div', { class: 'section-head' }, [
+        el('span', { class: 'section-label' }, label), el('span', { class: 'section-count' }, String(count)),
+        el('div', { class: 'grow' }),
+        el('button', { class: 'btn ghost sm', onclick: onAdd }, [icon('plus'), addLabel]),
+      ]),
+      body,
+    ]);
   }
 
   function renderFieldsSection(d0) {
@@ -229,11 +243,8 @@ export function createGoldenEditor(host, opts) {
     d0.extracted_fields.forEach((cell, idx) => {
       body.appendChild(cellRow(cell, `documents[0].fields[${cell.key}]`, () => { d0.extracted_fields.splice(idx, 1); markDirty(); render(); }));
     });
-    return el('div', { class: 'section-block' }, [
-      el('div', { class: 'section-head' }, [el('h4', {}, 'Fields'), el('div', { class: 'grow' }),
-        el('button', { class: 'btn btn-sm', onclick: () => { d0.extracted_fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); } }, '+ Add Field')]),
-      body,
-    ]);
+    const addField = () => { d0.extracted_fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); };
+    return sectionShell('필드', d0.extracted_fields.length, '필드 추가', addField, body);
   }
 
   function renderGroupsSection(d0) {
@@ -245,21 +256,18 @@ export function createGoldenEditor(host, opts) {
       g.fields.forEach((cell, fi) => {
         fieldsHost.appendChild(cellRow(cell, `documents[0].groups[${g.key}].fields[${cell.key}]`, () => { g.fields.splice(fi, 1); markDirty(); render(); }));
       });
-      fieldsHost.appendChild(el('button', { class: 'btn btn-sm btn-ghost', onclick: () => { g.fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); } }, '+ Add Field'));
+      fieldsHost.appendChild(el('button', { class: 'btn ghost sm', onclick: () => { g.fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); } }, [icon('plus'), '필드 추가']));
       body.appendChild(el('div', { class: 'group-block' }, [
         el('div', { class: 'group-head' }, [
-          el('span', { class: 'chev', onclick: () => { collapsed ? collapsedGroups.delete(gi) : collapsedGroups.add(gi); render(); } }, icon(collapsed ? 'right' : 'down')),
+          el('button', { class: 'chev', onclick: () => { collapsed ? collapsedGroups.delete(gi) : collapsedGroups.add(gi); render(); } }, icon(collapsed ? 'chevron-right' : 'chevron-down')),
           el('input', { type: 'text', value: g.key, oninput: (e) => { g.key = e.target.value; markDirty(); } }),
-          el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { d0.extracted_groups.splice(gi, 1); markDirty(); render(); } }, icon('x')),
+          el('button', { class: 'field-row-del', title: '그룹 삭제', onclick: () => { d0.extracted_groups.splice(gi, 1); markDirty(); render(); } }, icon('x')),
         ]),
         fieldsHost,
       ]));
     });
-    return el('div', { class: 'section-block' }, [
-      el('div', { class: 'section-head' }, [el('h4', {}, 'Groups'), el('div', { class: 'grow' }),
-        el('button', { class: 'btn btn-sm', onclick: () => { d0.extracted_groups.push({ key: '새 그룹', fields: [] }); markDirty(); render(); } }, '+ Add Group')]),
-      body,
-    ]);
+    const addGroup = () => { d0.extracted_groups.push({ key: '새 그룹', fields: [] }); markDirty(); render(); };
+    return sectionShell('그룹', d0.extracted_groups.length, '그룹 추가', addGroup, body);
   }
 
   function renderTablesSection(d0) {
@@ -292,34 +300,31 @@ export function createGoldenEditor(host, opts) {
           return el('td', tipHandlers(path), el('input', { type: 'text', value: cell.value == null ? '' : cell.value,
             oninput: (e) => { cell.value = e.target.value; markDirty(); } }));
         }),
-        el('td', {}, el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { t.rows.splice(ri, 1); markDirty(); render(); } }, icon('x'))),
+        el('td', {}, el('button', { class: 'field-row-del', title: '행 삭제', onclick: () => { t.rows.splice(ri, 1); markDirty(); render(); } }, icon('x'))),
       ])));
       body.appendChild(el('div', { class: 'table-block' }, [
         el('div', { class: 'table-head-row' }, [
           el('input', { type: 'text', value: t.key, oninput: (e) => { t.key = e.target.value; markDirty(); } }),
-          el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { d0.extracted_tables.splice(ti, 1); markDirty(); render(); } }, icon('x')),
+          el('button', { class: 'field-row-del', title: '표 삭제', onclick: () => { d0.extracted_tables.splice(ti, 1); markDirty(); render(); } }, icon('x')),
         ]),
         el('div', { class: 'gs-table-wrap' }, el('table', { class: 'gs-table', dataset: { tableIndex: ti } }, [el('thead', {}, headRow), tbody])),
         el('div', { class: 'gs-table-actions' }, [
-          el('button', { class: 'btn btn-sm', onclick: () => {
+          el('button', { class: 'btn ghost sm', onclick: () => {
             t.rows.push(t.headers.map((h) => ({ key: h, value: '', dtype: 'string' })));
             markDirty();
             rerenderAt(`.gs-table[data-table-index="${ti}"] tbody tr:last-child input`, `.table-block:nth-child(${ti + 1}) .gs-table-actions button:last-child`);
-          } }, '+ 행'),
-          el('button', { class: 'btn btn-sm', onclick: () => {
+          } }, [icon('plus'), '행 추가']),
+          el('button', { class: 'btn ghost sm', onclick: () => {
             t.headers.push('새 열');
             t.rows.forEach((row) => row.push({ key: t.headers[t.headers.length - 1], value: '', dtype: 'string' }));
             markDirty();
             rerenderAt(`.gs-table[data-table-index="${ti}"] thead input[data-col-index="${t.headers.length - 1}"]`);
-          } }, '+ 열'),
+          } }, [icon('plus'), '열 추가']),
         ]),
       ]));
     });
-    return el('div', { class: 'section-block' }, [
-      el('div', { class: 'section-head' }, [el('h4', {}, 'Tables'), el('div', { class: 'grow' }),
-        el('button', { class: 'btn btn-sm', onclick: () => { d0.extracted_tables.push({ key: '새 표', headers: ['열1'], rows: [] }); markDirty(); render(); } }, '+ Add Table')]),
-      body,
-    ]);
+    const addTable = () => { d0.extracted_tables.push({ key: '새 표', headers: ['열1'], rows: [] }); markDirty(); render(); };
+    return sectionShell('표', d0.extracted_tables.length, '표 추가', addTable, body);
   }
 
   function renderAdvanced() {
@@ -330,7 +335,7 @@ export function createGoldenEditor(host, opts) {
       ta,
       errBox,
       el('div', { style: 'display:flex;gap:8px;margin-top:8px' }, [
-        el('button', { class: 'btn btn-primary btn-sm', onclick: () => {
+        el('button', { class: 'btn primary sm', onclick: () => {
           try {
             const parsed = JSON.parse(ta.value);
             if (!parsed || !Array.isArray(parsed.documents)) throw new Error('documents 배열이 필요합니다.');
@@ -338,7 +343,7 @@ export function createGoldenEditor(host, opts) {
             clear(errBox);
           } catch (e) { clear(errBox); errBox.appendChild(document.createTextNode('JSON 오류: ' + e.message)); }
         } }, '적용'),
-        el('button', { class: 'btn btn-sm', onclick: () => { advanced = false; render(); } }, '폼으로 돌아가기'),
+        el('button', { class: 'btn sm', onclick: () => { advanced = false; render(); } }, '폼으로 돌아가기'),
       ]),
     ]);
   }
@@ -352,7 +357,7 @@ export function createGoldenEditor(host, opts) {
     addField: () => { if (!doc.golden) return; const d0 = ensureDoc0(); d0.extracted_fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); },
     deleteFocused: () => {
       const active = host.querySelector('.field-row:focus-within, .field-row:hover');
-      if (active) { const del = active.querySelector('.btn-danger'); if (del) del.click(); }
+      if (active) { const del = active.querySelector('.field-row-del'); if (del) del.click(); }
     },
     getGoldenObject: () => golden,
     setDoc: (newDoc) => { doc = newDoc; if (!dirty) golden = doc.golden ? JSON.parse(JSON.stringify(doc.golden)) : null; cmap = compareMap(doc.compare); render(); },

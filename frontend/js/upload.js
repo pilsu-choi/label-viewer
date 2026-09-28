@@ -48,7 +48,8 @@ function bundleAnatomy() {
     ['doc_002', ['.tif', '.png', '.json', '.json', null]],
     ['doc_003', ['.png', null, '.json', null, null]],
   ];
-  return el('figure', { class: 'anatomy' }, [
+  return el('details', { class: 'anatomy' }, [
+    el('summary', {}, '번들 구조 예시'),
     el('table', {}, [
       el('thead', {}, el('tr', {}, [el('th', {}, ''), ...cols.map((c) => el('th', {}, c))])),
       el('tbody', {}, rows.map(([stem, exts]) => el('tr', {}, [
@@ -56,7 +57,7 @@ function bundleAnatomy() {
         ...exts.map((x) => el('td', { class: x ? '' : 'miss' }, x || '없음')),
       ]))),
     ]),
-    el('figcaption', {}, '확장자를 뗀 파일명이 같으면 한 문서입니다. 빠진 파일은 그 문서에만 표시되고, 번들 전체는 그대로 열립니다.'),
+    el('p', { class: 'anatomy-caption' }, '확장자를 뗀 파일명이 같으면 한 문서입니다. 빠진 파일은 그 문서에만 표시되고, 번들 전체는 그대로 열립니다.'),
   ]);
 }
 
@@ -98,7 +99,11 @@ export function renderUpload(root) {
     if (!recentHost) return;
     clear(recentHost);
     if (!state.bundles.length) {
-      recentHost.appendChild(el('div', { class: 'recent-empty' }, '아직 올린 번들이 없습니다. 위에 폴더나 ZIP을 놓으면 여기에 쌓입니다.'));
+      recentHost.appendChild(el('div', { class: 'empty' }, [
+        icon('folder'),
+        el('div', { class: 'empty-title' }, '아직 올린 번들이 없습니다'),
+        el('div', { class: 'empty-desc' }, '위에서 폴더나 ZIP을 올리면 여기에 쌓입니다.'),
+      ]));
       return;
     }
     const list = el('div', { class: 'recent-list' });
@@ -111,7 +116,7 @@ export function renderUpload(root) {
         el('span', { class: 'cnt' }, [el('b', {}, String(c.golden || 0)), 'Golden']),
         el('span', { class: 'cnt' }, [el('b', {}, String(c.reviewed || 0)), '검수 완료']),
         el('span', { class: `cnt ${c.error ? 'bad' : ''}` }, [el('b', {}, String(c.error || 0)), '오류']),
-        el('button', { class: 'btn btn-ghost btn-sm', onclick: (e) => deleteBundle(b.id, e) }, '삭제'),
+        el('button', { class: 'btn sm icon danger', title: '번들 삭제', 'aria-label': '번들 삭제', onclick: (e) => deleteBundle(b.id, e) }, icon('trash')),
       ]));
     }
     recentHost.appendChild(list);
@@ -132,8 +137,8 @@ export function renderUpload(root) {
       !state.uploading && el('div', { class: 'dz-sub' }, '같은 파일명끼리 원본·전처리·AO·Harness·Golden을 자동으로 묶습니다.'),
       state.uploading && el('div', { class: 'dz-progress' }, el('span', { style: `width:${Math.round(state.progress * 100)}%` })),
       !state.uploading && el('div', { class: 'dz-actions' }, [
-        el('button', { class: 'btn btn-primary', onclick: () => folderInput.click() }, '폴더 선택'),
-        el('button', { class: 'btn', onclick: () => zipInput.click() }, 'ZIP 선택'),
+        el('button', { class: 'btn primary', onclick: () => folderInput.click() }, [icon('folder'), '폴더 선택']),
+        el('button', { class: 'btn', onclick: () => zipInput.click() }, [icon('file-archive'), 'ZIP 선택']),
       ]),
       state.error && el('div', { class: 'dz-error' }, state.error),
     ]);
@@ -157,11 +162,11 @@ export function renderUpload(root) {
         el('div', { class: 'upload-intro' }, [
           el('h1', {}, '스캔본 옆에서 정답지를 확정하세요'),
           el('p', {}, 'AO와 Harness가 읽은 값을 원본 이미지와 한 화면에 놓고, 칸마다 맞았는지 가립니다. 고친 값은 Golden JSON 파일에 바로 저장됩니다.'),
-          dz, folderInput, zipInput,
         ]),
+        dz, folderInput, zipInput,
         bundleAnatomy(),
+        recentPanel,
       ]),
-      recentPanel,
     ]);
     drawRecent();
   }

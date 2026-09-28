@@ -1,8 +1,9 @@
 import { el, clear } from './util.js';
 
-const stateOf = (doc) => doc.errors && doc.errors.length ? ['error', '오류']
-  : doc.review === 'done' ? ['done', '검수 완료']
-    : doc.review === 'progress' ? ['progress', '검수 중'] : ['pending', '미검수'];
+const STATE = { pending: ['pending', '미검수', 'muted'], progress: ['progress', '검수 중', 'warn'], done: ['done', '검수 완료', 'ok'], error: ['error', '오류', 'bad'] };
+const stateOf = (doc) => doc.errors && doc.errors.length ? STATE.error
+  : doc.review === 'done' ? STATE.done
+    : doc.review === 'progress' ? STATE.progress : STATE.pending;
 
 export function createDocumentRail(host, docs, currentId, onSelect) {
   let query = '', filter = 'all';
@@ -14,7 +15,11 @@ export function createDocumentRail(host, docs, currentId, onSelect) {
   ]);
   const titleCount = el('span', { class: 'doc-rail-count' }, String(docs.length));
   const list = el('nav', { class: 'doc-rail-list', 'aria-label': '번들 문서' });
-  host.append(el('div', { class: 'doc-rail-head' }, [el('div', { class: 'doc-rail-title' }, ['Documents', titleCount]), search, select]), list);
+  host.append(
+    el('div', { class: 'doc-rail-head panel-head' }, [el('span', {}, '문서'), el('div', { class: 'grow' }), titleCount]),
+    el('div', { class: 'doc-rail-filters' }, [search, select]),
+    list,
+  );
 
   function draw() {
     const q = query.trim().toLocaleLowerCase();
@@ -26,15 +31,17 @@ export function createDocumentRail(host, docs, currentId, onSelect) {
     clear(list);
     if (!visible.length) { list.appendChild(el('div', { class: 'doc-rail-empty' }, '문서가 없습니다.')); return; }
     visible.forEach((doc) => {
-      const [status, label] = stateOf(doc);
+      const [, label, tone] = stateOf(doc);
       const mismatches = ['ao', 'harness'].reduce((n, side) => n + (doc.score?.[side]?.MISMATCH || 0) + (doc.score?.[side]?.TYPE_MISMATCH || 0) + (doc.score?.[side]?.MISSING || 0) + (doc.score?.[side]?.EXTRA || 0), 0);
       const button = el('button', { class: `doc-rail-item ${doc.id === currentId ? 'active' : ''}`, 'aria-current': doc.id === currentId ? 'page' : null,
         title: `${doc.id}${doc.doc_type ? ` · ${doc.doc_type}` : ''}`, onclick: () => onSelect(doc.id) }, [
-        el('span', { class: 'doc-rail-id' }, doc.id),
-        el('span', { class: 'doc-rail-type' }, doc.doc_type || '유형 미지정'),
-        el('span', { class: 'doc-rail-meta' }, [
-          el('span', { class: `doc-rail-state ${status}` }, label),
-          mismatches ? el('span', { class: 'doc-rail-mismatch' }, `${mismatches} mismatch`) : null,
+        el('div', { class: 'dr-row' }, [
+          el('span', { class: 'dr-id' }, doc.id),
+          el('span', { class: `badge badge-${tone}` }, label),
+        ]),
+        el('div', { class: 'dr-row' }, [
+          el('span', { class: 'dr-type' }, doc.doc_type || '유형 미지정'),
+          mismatches ? el('span', { class: 'dr-mismatch' }, `불일치 ${mismatches}`) : null,
         ]),
       ]);
       list.appendChild(button);

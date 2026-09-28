@@ -71,14 +71,14 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
     clear(host);
     const list = doc.compare || [];
     const c = counts(list);
-    const toolbar = el('div', { class: 'cmp-toolbar' }, [
-      ...[['all', '전체', list.length], ['mismatch', '불일치', c.mismatch], ['missing', '누락', c.missing], ['extra', '추가', c.extra]]
-        .map(([key, label, n]) => el('button', {
-          class: `chip ${state.filter === key ? 'active' : ''}`,
+    const toolbar = el('div', { class: 'cmp-toolbar seg' }, [
+      ...[['all', '전체', list.length, false], ['mismatch', '불일치', c.mismatch, true], ['missing', '누락', c.missing, true], ['extra', '추가', c.extra, true]]
+        .map(([key, label, n, warnTone]) => el('button', {
+          class: state.filter === key ? 'active' : '',
           title: key === 'all' ? '모든 비교 항목을 표시합니다.' : key === 'mismatch'
             ? `${statusDescription('MISMATCH')} 형식오류도 포함합니다.` : statusDescription(key.toUpperCase()),
           onclick: () => { state.filter = key; draw(); },
-        }, [label, el('span', { class: 'n' }, String(n))])),
+        }, [label, el('span', { class: `seg-count ${n && warnTone ? 'bad' : ''}` }, String(n))])),
     ]);
     const scoreCards = el('div', { class: 'cmp-score-cards' }, [scoreCard('AO Extract', doc.score && doc.score.ao), scoreCard('Harness', doc.score && doc.score.harness)]);
 
@@ -115,8 +115,8 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
             el('td', {}, el('div', { class: 'cmp-cell' }, [diffSpan(e.golden, e.ao), statusBadge(e.ao_status)])),
             el('td', {}, el('div', { class: 'cmp-cell' }, [diffSpan(e.golden, e.harness), statusBadge(e.harness_status)])),
             el('td', { class: 'cmp-adopt' }, [
-              onAdopt && e.ao != null && e.ao !== '' && el('button', { class: 'btn btn-sm', title: 'AO 값을 정답으로', onclick: () => onAdopt(e, e.ao) }, 'AO 채택'),
-              onAdopt && e.harness != null && e.harness !== '' && el('button', { class: 'btn btn-sm', title: 'Harness 값을 정답으로', onclick: () => onAdopt(e, e.harness) }, 'H 채택'),
+              onAdopt && e.ao != null && e.ao !== '' && el('button', { class: 'btn sm', title: 'AO 값을 정답으로', onclick: () => onAdopt(e, e.ao) }, 'AO 채택'),
+              onAdopt && e.harness != null && e.harness !== '' && el('button', { class: 'btn sm', title: 'Harness 값을 정답으로', onclick: () => onAdopt(e, e.harness) }, 'H 채택'),
             ]),
           ]);
           tbody.appendChild(tr);

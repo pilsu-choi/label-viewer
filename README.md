@@ -33,7 +33,7 @@ python3 scripts/make_dummy_bundle.py --out samples/dummy_bundle   # samples/dumm
 
 ## 실전형 더미 번들 (`dummy2`)
 
-`e2e/표본결과`의 실제 문서 14건을 이미지·AO 응답·Harness 응답·정답지로 묶는다(문서 종류별 2건). 기본 `ui` 형식은 UI response를 `ao_extract/`에 넣어 Golden·Compare·bbox 입력으로 정규화하며, Raw JSON에서는 원문을 보여 준다. 파일명은 D2 별칭으로 바뀌고, 원본 파일 바이트와 JSON 내용은 그대로 복사된다. 별칭 덕분에 원본의 환자 식별자가 번들 파일명에 포함되지 않지만, 이미지와 JSON 본문에는 개인정보와 의료 정보가 남아 있다.
+`e2e/표본결과`의 실제 문서 14건을 이미지·AO 응답·Harness 응답·정답지로 묶는다(문서 종류별 2건). 기본 `ui` 형식은 UI response를 `ao_extract/`에 넣어 Golden·Compare·bbox 입력으로 정규화하며, JSON 탭에서는 원문을 보여 준다. 파일명은 D2 별칭으로 바뀌고, 원본 파일 바이트와 JSON 내용은 그대로 복사된다. 별칭 덕분에 원본의 환자 식별자가 번들 파일명에 포함되지 않지만, 이미지와 JSON 본문에는 개인정보와 의료 정보가 남아 있다.
 
 ```bash
 python3 scripts/make_dummy2.py --source-root ../e2e/표본결과 --out samples/dummy2
@@ -63,7 +63,7 @@ bundle/
 └── golden/        document_001.json       (또는 .answer.json)
 ```
 
-- **AO 추출 입력**은 `ao_extract/`에 둔다. `.aiocr.json`은 기존 AO 추출 JSON이고, `.aiocr.ui.json`은 UI response JSON(`documents[].result`)이다. UI response는 Golden·Compare·bbox에 사용할 수 있도록 AO 구조로 정규화하며, Raw JSON 탭은 업로드 원문을 보여 준다.
+- **AO 추출 입력**은 `ao_extract/`에 둔다. `.aiocr.json`은 기존 AO 추출 JSON이고, `.aiocr.ui.json`은 UI response JSON(`documents[].result`)이다. UI response는 Golden·Compare·bbox에 사용할 수 있도록 AO 구조로 정규화하며, JSON 탭은 업로드 원문을 보여 준다.
 - **별도 AO UI sidecar**는 선택 사항이며 `ao_ui/` 또는 `aiocr_ui/`에 둔다. stem이 같은 문서의 bbox 근거로 쓰인다. `ao_ui/`만 있는 업로드는 문서 입력으로 간주하지 않는다. `ao_extract/`의 `.aiocr.ui.json`은 유효한 AO 입력이다.
 - 폴더 이름은 조금 달라도 인식한다(`원본`, `전처리`, `aiocr`, `정답` 등). 번들 파일은 stem이 같으면 같은 문서로 묶인다.
 - 확장자와 알려진 접미사를 뗀 파일명(stem)이 같으면 같은 문서로 묶는다. 빠진 파일이 있어도 번들 전체가 실패하지 않고, 해당 문서에 Missing이나 오류로만 표시된다.
@@ -85,9 +85,9 @@ bundle/
 
 ## 상세 검수 화면
 
-상세 화면은 문서 목록, 이미지 뷰어, Golden Set 검수 영역을 하나의 작업 공간에 배치한다. 왼쪽 목록에서 ID·유형을 검색하고 검수 상태로 거를 수 있다. 중앙에서 원본과 전처리 이미지를 확인하며, 우측의 Golden 편집 행에서 AO·Harness 값을 비교하고 바로 채택할 수 있다. 편집 행이나 비교 항목에 마우스를 올리면 비교값·상태·근거가 나타난다. 비교 데이터에 bbox가 연결돼 있으면 강조 테두리로 이미지 위치를 표시하고 bbox 주변으로 확대한다. hover가 끝나면 이전 확대·이동 상태를 복원한다.
+상세 화면은 문서 목록, 이미지 뷰어, Golden Set 검수 영역을 하나의 작업 공간에 배치한다. 왼쪽 목록에서 ID·유형을 검색하고 검수 상태로 거를 수 있다. 중앙에서 원본과 전처리 이미지를 확인하며, 우측의 Golden 편집 행에서 AO·Harness 값을 비교하고 바로 채택할 수 있다. 편집 행이나 비교 항목에 마우스를 올리면 비교값·상태·근거가 나타난다. 비교 데이터에 bbox가 연결돼 있으면 강조 테두리로 이미지 위치를 표시한다. 이미지 툴바의 "자동 확대"/"위치만 표시" 세그먼트(단축키 `Z`)로 hover 시 동작을 고를 수 있다. 자동 확대는 bbox 주변으로 확대하고 hover가 끝나면 이전 확대·이동 상태를 복원하며, 위치만 표시는 배율을 바꾸지 않고 강조 테두리만 그리되 bbox가 화면 밖이면 살짝 이동만 한다. 선택은 브라우저에 저장돼 다음 방문에도 유지된다. 이미지가 화면 전체를 벗어나 확대·이동된 상태면 우측 하단에 미니맵이 나타나 전체 페이지에서의 bbox 위치와 현재 보이는 영역을 보여 주며, 미니맵을 클릭·드래그하면 그 지점으로 이동한다.
 
-우측의 비교 탭은 mismatch·missing·extra를 필터링하고 상태별 설명을 hover로 확인한다. Raw JSON 탭은 Golden·AO Extract·Harness 원문을 접고 펼칠 수 있는 트리로 보여 주며, 별도 `ao_ui/` sidecar가 있으면 AO UI 원문 선택지도 표시한다. `ao_extract/`의 UI response는 AO Extract 원문 선택에서 정규화 전 입력 그대로 확인할 수 있다. 처음에는 사용 가능한 첫 원본을 선택하고, 키·값 검색과 복사를 지원한다. Golden 표 편집에서는 열 삭제와 행·열 추가 뒤 새 편집 위치로 포커스를 옮긴다. Reconstructed View는 Golden·AO·Harness 데이터를 HTML 또는 Markdown으로 보여 준다. 문서 목록과 이미지, 이미지와 검수 패널, 검수 패널과 재구성 뷰 사이의 경계를 끌어 크기를 조절할 수 있다. Golden 편집은 기본적으로 1.5초 뒤 자동 저장된다.
+우측의 비교 탭은 mismatch·missing·extra를 필터링하고 상태별 설명을 hover로 확인한다. JSON 탭은 Golden·AO Extract·Harness 원문을 접고 펼칠 수 있는 트리로 보여 주며, 별도 `ao_ui/` sidecar가 있으면 AO UI 원문 선택지도 표시한다. `ao_extract/`의 UI response는 AO Extract 원문 선택에서 정규화 전 입력 그대로 확인할 수 있다. 처음에는 사용 가능한 첫 원본을 선택하고, 키·값 검색(일치 강조), 모두 펼치기·접기, 경로 표시·복사를 지원한다. Golden 표 편집에서는 열 삭제와 행·열 추가 뒤 새 편집 위치로 포커스를 옮긴다. 재구성 보기는 Golden·AO·Harness 데이터를 HTML 또는 Markdown으로 보여 준다. 문서 목록과 이미지, 이미지와 검수 패널, 검수 패널과 재구성 뷰 사이의 경계를 끌어 크기를 조절할 수 있다. Golden 편집은 기본적으로 1.5초 뒤 자동 저장되며, JSON 보기와 Golden 삭제는 편집 패널 상단의 `⋯` 메뉴에 있다.
 
 ## 단축키 (상세 화면)
 
@@ -98,7 +98,8 @@ bundle/
 | `+` / `Delete` | 필드 추가 / 삭제 |
 | `M` | 다음 불일치 항목으로 이동 |
 | `O` | 원본 ↔ 전처리 이미지 |
-| `1` `2` `3` | Reconstructed View 원본을 Golden / AO / Harness로 전환 |
+| `Z` | bbox hover 확대 방식 전환 (자동 확대 ↔ 위치만 표시) |
+| `1` `2` `3` | 재구성 보기 원본을 Golden / AO / Harness로 전환 |
 | `?` | 도움말 |
 
 입력창에서 편집하는 중에는 `Ctrl+S`만 동작한다.
@@ -125,5 +126,5 @@ deploy/k8s pvc · deployment · service · kustomization
 ## 보안
 
 - 화면은 값을 `textContent`로만 넣고 `innerHTML`은 쓰지 않는다. 그래서 업로드한 값 안의 HTML·스크립트는 실행되지 않는다.
-- Reconstructed View의 HTML·Markdown 렌더러도 JSON을 바탕으로 DOM을 직접 만든다.
+- 재구성 보기의 HTML·Markdown 렌더러도 JSON을 바탕으로 DOM을 직접 만든다.
 - 업로드 경로는 검사한다. `..`, 절대 경로, zip slip은 거부한다.
