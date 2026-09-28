@@ -27,4 +27,4 @@ rm -f label-viewer.tar.gz
 \$D compose --env-file .env.aws ps
 REMOTE
 
-echo "[deploy] 완료. 서버 루프백 ${LABEL_VIEWER_PORT:-8765} 에만 열려 있다 — deploy/aws/tunnel.sh 로 접근한다."
+echo "[deploy] 완료. ${LABEL_VIEWER_BIND:-127.0.0.1}:${LABEL_VIEWER_PORT:-8765} 에 열려 있다(루프백이면 deploy/aws/tunnel.sh 로 접근)."

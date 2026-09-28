@@ -22,6 +22,7 @@ status: active
 
 ### Update
 
+- [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): AWS 실배포 결과와 0.0.0.0 외부 노출 주의 추가.
 - [README](../README.md): 배포 절을 Docker Compose·AWS 개발 서버·Kubernetes로 나누고 구조에 deploy/aws 추가.
 - [wiki/index.md](index.md): Docker·AWS 배포 문서 링크 추가.
 - [README](../README.md): 비교 탭 기본 불일치 필터·소스 필터·검색·셀 채택·저장 대기·상태 색·행 묶기·근거 위치와 비교 탭 키보드(`↑/↓`, `A`/`H`, `Enter`) 안내 반영.

@@ -37,4 +37,9 @@ status: active
 ## 검증
 
 - 로컬 `docker compose up -d --build --wait`: 이미지 195MB, `healthy`, `/api/health` `{"ok":true}`, `/` 200.
-- AWS 배포: 인스턴스 기동 후 진행(아래 결과 갱신 예정).
+- AWS 배포(2026-09-29): `LABEL_VIEWER_BIND=0.0.0.0`으로 배포, 컨테이너 `healthy`, 게시 `0.0.0.0:8765->8765`. 서버 안 `curl 127.0.0.1:8765/api/health` 정상.
+- 외부 접속: 배포 직후 외부 요청은 타임아웃이었다. 서버에 firewalld가 없으므로 보안그룹 인바운드 TCP 8765를 열어야 한다.
+
+## 외부 노출 주의
+
+요청에 따라 서버를 `0.0.0.0`으로 바인딩했다. 앱에 인증과 TLS가 없으므로 보안그룹 소스 IP를 사무실·VPN 대역으로 제한한다. 루프백 전용으로 되돌리려면 `.env.aws`의 `LABEL_VIEWER_BIND=127.0.0.1`로 재배포한다.
