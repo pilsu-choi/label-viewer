@@ -15,8 +15,18 @@ function readFocusMode() {
 }
 function writeFocusMode(mode) { try { localStorage.setItem('lv.bboxMode', mode); } catch {} }
 
+const RECON_HEIGHT_DEFAULT = 220;
+function readReconCollapsed() {
+  try { return localStorage.getItem('lv.reconCollapsed') === '1'; } catch { return false; }
+}
+function writeReconCollapsed(v) { try { localStorage.setItem('lv.reconCollapsed', v ? '1' : '0'); } catch {} }
+function readReconHeight() {
+  try { const n = Number(localStorage.getItem('lv.reconHeight')); return n >= 90 ? n : RECON_HEIGHT_DEFAULT; } catch { return RECON_HEIGHT_DEFAULT; }
+}
+function writeReconHeight(h) { try { localStorage.setItem('lv.reconHeight', String(Math.round(h))); } catch {} }
+
 export function renderDetail(root, bundleId, docId) {
-  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode() };
+  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), reconCollapsed: readReconCollapsed() };
   let doc = null, bundle = null, editor = null, compareApi = null, imgViewer = null, documentRail = null;
   let saveStateEl, reviewInput, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
   let leftPanel, rightPanel, closeExportMenus, dragCleanup;
@@ -263,7 +273,7 @@ export function renderDetail(root, bundleId, docId) {
 
     buildRawTab();
 
-    const vsplit = el('div', { class: 'splitter v' });
+    const vsplit = el('div', { class: 'splitter v', style: state.reconCollapsed ? 'display:none' : '' });
     reconBody = el('div', { class: 'recon-body' });
     reconSourceButtons.golden = el('button', { class: 'active', onclick: () => setReconSource('golden') }, 'Golden');
     reconSourceButtons.ao = el('button', { onclick: () => setReconSource('ao'), disabled: !doc.has.ao_extract }, 'AO');
@@ -272,18 +282,32 @@ export function renderDetail(root, bundleId, docId) {
       html: el('button', { class: 'active', onclick: () => { state.reconRenderer = 'html'; rendererButtons.html.classList.add('active'); rendererButtons.md.classList.remove('active'); drawRecon(); } }, 'HTML'),
       md: el('button', { onclick: () => { state.reconRenderer = 'md'; rendererButtons.md.classList.add('active'); rendererButtons.html.classList.remove('active'); drawRecon(); } }, 'Markdown'),
     };
-    const reconPanel = el('div', { class: 'recon-panel', style: 'height:280px' }, [
+    const reconCollapseBtn = el('button', {
+      class: 'btn ghost icon sm', title: state.reconCollapsed ? '펼치기' : '접기', 'aria-label': '재구성 패널 접기/펼치기',
+      onclick: toggleReconCollapse,
+    }, icon(state.reconCollapsed ? 'chevron-right' : 'chevron-down'));
+    const reconPanel = el('div', { class: `recon-panel ${state.reconCollapsed ? 'collapsed' : ''}`, style: state.reconCollapsed ? '' : `height:${readReconHeight()}px` }, [
       el('div', { class: 'panel-head recon-toolbar' }, [
+        reconCollapseBtn,
         el('span', { class: 'label' }, '재구성 보기'),
         el('div', { class: 'seg' }, [reconSourceButtons.golden, reconSourceButtons.ao, reconSourceButtons.harness]),
         el('div', { class: 'seg' }, [rendererButtons.html, rendererButtons.md]),
       ]),
       reconBody,
     ]);
+    function toggleReconCollapse() {
+      state.reconCollapsed = !state.reconCollapsed;
+      writeReconCollapsed(state.reconCollapsed);
+      reconPanel.classList.toggle('collapsed', state.reconCollapsed);
+      reconPanel.style.height = state.reconCollapsed ? '' : `${readReconHeight()}px`;
+      vsplit.style.display = state.reconCollapsed ? 'none' : '';
+      reconCollapseBtn.title = state.reconCollapsed ? '펼치기' : '접기';
+      clear(reconCollapseBtn); reconCollapseBtn.appendChild(icon(state.reconCollapsed ? 'chevron-right' : 'chevron-down'));
+    }
 
     let dragging = false, startY = 0, startH = 0;
     const onVMove = (e) => { if (!dragging) return; const h = Math.min(Math.max(90, startH - (e.clientY - startY)), rightPanel.clientHeight - 120); reconPanel.style.height = `${h}px`; };
-    const onVUp = () => { dragging = false; vsplit.classList.remove('active'); };
+    const onVUp = () => { if (dragging) writeReconHeight(reconPanel.getBoundingClientRect().height); dragging = false; vsplit.classList.remove('active'); };
     vsplit.addEventListener('mousedown', (e) => { dragging = true; startY = e.clientY; startH = reconPanel.getBoundingClientRect().height; vsplit.classList.add('active'); });
     window.addEventListener('mousemove', onVMove);
     window.addEventListener('mouseup', onVUp);
