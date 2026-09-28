@@ -1,16 +1,48 @@
 import { el, clear } from './util.js';
 
-// 확대/축소·드래그 팬·bbox 오버레이를 갖춘 이미지 뷰어. stage 엘리먼트 하나에 마운트한다.
-export function createImageViewer(stage, { onZoomChange } = {}) {
+// 확대/축소·드래그 팬·bbox 오버레이·미니맵을 갖춘 이미지 뷰어. stage 엘리먼트 하나에 마운트한다.
+export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   const canvas = el('div', { class: 'viewer-canvas' });
   const bboxLayer = el('div', { class: 'bbox-layer' });
   canvas.appendChild(bboxLayer);
   stage.appendChild(canvas);
 
+  const minimapImg = el('img', { alt: '' });
+  const minimapBoxes = el('div', { class: 'mm-boxes' });
+  const minimapViewport = el('div', { class: 'mm-viewport' });
+  const minimapEl = el('div', { class: 'minimap' }, [minimapImg, minimapBoxes, minimapViewport]);
+  stage.appendChild(minimapEl);
+
   let scale = 1, tx = 0, ty = 0, natW = 0, natH = 0, imgEl = null;
   let pendingBoxes = [], focusView = null;
+  let mode = focusMode === 'locate' ? 'locate' : 'zoom';
 
-  function apply() { canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; if (onZoomChange) onZoomChange(scale); }
+  function apply() { canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; if (onZoomChange) onZoomChange(scale); updateMinimap(); }
+
+  function updateMinimap() {
+    if (!natW) { minimapEl.classList.remove('visible'); return; }
+    const stageW = stage.clientWidth, stageH = stage.clientHeight;
+    const fullyVisible = tx >= -0.5 && ty >= -0.5 && tx + natW * scale <= stageW + 0.5 && ty + natH * scale <= stageH + 0.5;
+    minimapEl.classList.toggle('visible', !fullyVisible);
+    const vx0 = Math.max(0, -tx / scale) / natW, vy0 = Math.max(0, -ty / scale) / natH;
+    const vx1 = Math.min(natW, (stageW - tx) / scale) / natW, vy1 = Math.min(natH, (stageH - ty) / scale) / natH;
+    Object.assign(minimapViewport.style, { left: `${vx0 * 100}%`, top: `${vy0 * 100}%`, width: `${Math.max(0, vx1 - vx0) * 100}%`, height: `${Math.max(0, vy1 - vy0) * 100}%` });
+  }
+
+  function minimapPanTo(e) {
+    const rect = minimapEl.getBoundingClientRect();
+    const fx = (e.clientX - rect.left) / rect.width, fy = (e.clientY - rect.top) / rect.height;
+    tx = stage.clientWidth / 2 - fx * natW * scale;
+    ty = stage.clientHeight / 2 - fy * natH * scale;
+    apply();
+  }
+  let mmDragging = false;
+  minimapEl.addEventListener('mousedown', (e) => { e.stopPropagation(); mmDragging = true; minimapPanTo(e); });
+  minimapEl.addEventListener('wheel', (e) => e.stopPropagation());
+  const onMmMove = (e) => { if (mmDragging) minimapPanTo(e); };
+  const onMmUp = () => { mmDragging = false; };
+  window.addEventListener('mousemove', onMmMove);
+  window.addEventListener('mouseup', onMmUp);
 
   function zoomAt(factor, cx, cy) {
     if (!natW) return;
@@ -72,6 +104,9 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
         if (imgEl) imgEl.remove();
         imgEl = img;
         canvas.insertBefore(img, bboxLayer);
+        minimapImg.src = url;
+        const s = Math.min(160 / natW, 200 / natH);
+        minimapEl.style.width = `${natW * s}px`; minimapEl.style.height = `${natH * s}px`;
         fitPage();
         setBoxes(pendingBoxes);
         resolve({ width: natW, height: natH });
@@ -88,12 +123,28 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
 
   function drawBoxes() {
     clear(bboxLayer);
+    clear(minimapBoxes);
     for (const b of pendingBoxes) {
-      bboxLayer.appendChild(el('div', {
-        class: 'bbox-rect',
-        style: `left:${b.x * 100}%;top:${b.y * 100}%;width:${b.w * 100}%;height:${b.h * 100}%`,
-      }));
+      const style = `left:${b.x * 100}%;top:${b.y * 100}%;width:${b.w * 100}%;height:${b.h * 100}%`;
+      bboxLayer.appendChild(el('div', { class: 'bbox-rect', style }));
+      minimapBoxes.appendChild(el('div', { class: 'mm-rect', style }));
     }
+  }
+
+  function setFocusMode(m) { mode = m === 'locate' ? 'locate' : 'zoom'; }
+
+  // 화면 밖으로 벗어난 bbox를 배율 변경 없이 화면 안으로 살짝 옮긴다.
+  function panIntoView(bx0, by0, bx1, by1) {
+    const stageW = stage.clientWidth, stageH = stage.clientHeight, m = 24;
+    const sx0 = tx + bx0 * scale, sy0 = ty + by0 * scale, sx1 = tx + bx1 * scale, sy1 = ty + by1 * scale;
+    let dx = 0, dy = 0;
+    if (sx1 - sx0 > stageW - 2 * m) dx = stageW / 2 - (sx0 + sx1) / 2;
+    else if (sx0 < m) dx = m - sx0;
+    else if (sx1 > stageW - m) dx = (stageW - m) - sx1;
+    if (sy1 - sy0 > stageH - 2 * m) dy = stageH / 2 - (sy0 + sy1) / 2;
+    else if (sy0 < m) dy = m - sy0;
+    else if (sy1 > stageH - m) dy = (stageH - m) - sy1;
+    if (dx || dy) { tx += dx; ty += dy; apply(); }
   }
 
   function focusBoxes(boxes) {
@@ -104,6 +155,7 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
     const y = Math.min(...boxes.map((b) => b.y));
     const right = Math.max(...boxes.map((b) => b.x + b.w));
     const bottom = Math.max(...boxes.map((b) => b.y + b.h));
+    if (mode === 'locate') { panIntoView(x * natW, y * natH, right * natW, bottom * natH); return; }
     const rectW = Math.max((right - x) * natW, 1);
     const rectH = Math.max((bottom - y) * natH, 1);
     const stageW = stage.clientWidth, stageH = stage.clientHeight;
@@ -130,14 +182,20 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
     pendingBoxes = [];
     if (imgEl) { imgEl.remove(); imgEl = null; }
     clear(bboxLayer);
+    clear(minimapBoxes);
+    minimapImg.removeAttribute('src');
+    updateMinimap();
     stage.querySelectorAll('.viewer-empty').forEach((n) => n.remove());
     if (message) stage.appendChild(el('div', { class: 'viewer-empty' }, message));
   }
 
   return {
-    load, setBoxes, focusBoxes, clearFocus, empty,
+    load, setBoxes, focusBoxes, clearFocus, empty, setFocusMode,
     zoomIn: () => zoomAt(1.25), zoomOut: () => zoomAt(0.8), fitWidth, fitPage,
     getScale: () => scale,
-    destroy: () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); },
+    destroy: () => {
+      window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('mousemove', onMmMove); window.removeEventListener('mouseup', onMmUp);
+    },
   };
 }

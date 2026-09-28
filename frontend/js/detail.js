@@ -10,10 +10,15 @@ import { createDocumentRail } from './documentRail.js';
 
 const RAW_KIND = { golden: 'golden', ao: 'ao_extract', harness: 'harness' };
 
+function readFocusMode() {
+  try { return localStorage.getItem('lv.bboxMode') === 'locate' ? 'locate' : 'zoom'; } catch { return 'zoom'; }
+}
+function writeFocusMode(mode) { try { localStorage.setItem('lv.bboxMode', mode); } catch {} }
+
 export function renderDetail(root, bundleId, docId) {
-  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1 };
+  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode() };
   let doc = null, bundle = null, editor = null, compareApi = null, imgViewer = null, documentRail = null;
-  let saveStateEl, reviewInput, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
+  let saveStateEl, reviewInput, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
   let leftPanel, rightPanel, closeExportMenus, dragCleanup;
   let destroyed = false;
 
@@ -43,6 +48,7 @@ export function renderDetail(root, bundleId, docId) {
     else if (e.key === 'Delete') { editor && editor.deleteFocused(); }
     else if (e.key === 'm' || e.key === 'M') { jumpNextMismatch(); }
     else if (e.key === 'o' || e.key === 'O') { toggleView(); }
+    else if (e.key === 'z' || e.key === 'Z') { setFocusMode(state.focusMode === 'zoom' ? 'locate' : 'zoom'); }
     else if (e.key === '1') { setReconSource('golden'); }
     else if (e.key === '2') { setReconSource('ao'); }
     else if (e.key === '3') { setReconSource('harness'); }
@@ -64,10 +70,18 @@ export function renderDetail(root, bundleId, docId) {
     for (const k in viewToggleBtns) viewToggleBtns[k].classList.toggle('active', k === state.view);
   }
 
+  function setFocusMode(mode) {
+    state.focusMode = mode;
+    focusModeBtns.zoom && focusModeBtns.zoom.classList.toggle('active', mode === 'zoom');
+    focusModeBtns.locate && focusModeBtns.locate.classList.toggle('active', mode === 'locate');
+    imgViewer && imgViewer.setFocusMode(mode);
+    writeFocusMode(mode);
+  }
+
   function openHelp() {
     if (helpOverlay) return;
     const rows = [['← / →', '이전 / 다음 문서'], ['Ctrl+S', '저장'], ['+', '필드 추가'], ['Delete', '필드 삭제'],
-      ['M', '다음 불일치'], ['O', '원본/전처리 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'], ['?', '도움말']];
+      ['M', '다음 불일치'], ['O', '원본/전처리 전환'], ['Z', 'bbox hover 확대/위치표시 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'], ['?', '도움말']];
     helpOverlay = el('div', { class: 'help-overlay', onclick: (e) => { if (e.target === helpOverlay) closeHelp(); } },
       el('div', { class: 'help-card' }, [
         el('h3', {}, '단축키'),
@@ -191,6 +205,11 @@ export function renderDetail(root, bundleId, docId) {
     ]);
     function refreshToggle() { viewToggleBtns.original.classList.toggle('active', state.view === 'original'); viewToggleBtns.preprocessed.classList.toggle('active', state.view === 'preprocessed'); }
 
+    const focusModeSeg = el('div', { class: 'seg focus-mode-seg' }, [
+      (focusModeBtns.zoom = el('button', { class: state.focusMode === 'zoom' ? 'active' : '', title: '행에 마우스를 올리면 bbox 위치로 자동 확대합니다. (Z)', onclick: () => setFocusMode('zoom') }, '자동 확대')),
+      (focusModeBtns.locate = el('button', { class: state.focusMode === 'locate' ? 'active' : '', title: '확대하지 않고 bbox 위치만 표시합니다. 화면 밖이면 살짝 이동합니다. (Z)', onclick: () => setFocusMode('locate') }, '위치만 표시')),
+    ]);
+
     pageLabel = el('span', {}, '');
     zoomLabel = el('span', { class: 'zoom-pct' }, '100%');
     const stage = el('div', { class: 'viewer-stage' });
@@ -201,6 +220,7 @@ export function renderDetail(root, bundleId, docId) {
     ]);
     const viewerToolbar = el('div', { class: 'panel-head viewer-toolbar' }, [
       viewToggle,
+      focusModeSeg,
       pageNavEl,
       el('div', { class: 'zoom-group' }, [
         el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomOut(), title: '축소' }, icon('zoom-out')),
@@ -211,7 +231,7 @@ export function renderDetail(root, bundleId, docId) {
       ]),
     ]);
     leftPanel = el('div', { class: 'detail-left' }, [viewerToolbar, stage]);
-    imgViewer = createImageViewer(stage, { onZoomChange: (s) => { zoomLabel.textContent = `${Math.round(s * 100)}%`; } });
+    imgViewer = createImageViewer(stage, { onZoomChange: (s) => { zoomLabel.textContent = `${Math.round(s * 100)}%`; }, focusMode: state.focusMode });
 
     // --- 우측: 탭 + 재구성 ---
     tabButtons.edit = el('button', { class: 'tab-btn active' }, '편집');
