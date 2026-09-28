@@ -32,7 +32,7 @@ export function createDocumentRail(host, docs, currentId, onSelect) {
     if (!visible.length) { list.appendChild(el('div', { class: 'doc-rail-empty' }, '문서가 없습니다.')); return; }
     visible.forEach((doc) => {
       const [, label, tone] = stateOf(doc);
-      const mismatches = ['ao', 'harness'].reduce((n, side) => n + (doc.score?.[side]?.MISMATCH || 0) + (doc.score?.[side]?.TYPE_MISMATCH || 0) + (doc.score?.[side]?.MISSING || 0) + (doc.score?.[side]?.EXTRA || 0), 0);
+      const mismatches = doc.mismatch || 0;
       const button = el('button', { class: `doc-rail-item ${doc.id === currentId ? 'active' : ''}`, 'aria-current': doc.id === currentId ? 'page' : null,
         title: `${doc.id}${doc.doc_type ? ` · ${doc.doc_type}` : ''}`, onclick: () => onSelect(doc.id) }, [
         el('div', { class: 'dr-row' }, [
@@ -41,7 +41,7 @@ export function createDocumentRail(host, docs, currentId, onSelect) {
         ]),
         el('div', { class: 'dr-row' }, [
           el('span', { class: 'dr-type' }, doc.doc_type || '유형 미지정'),
-          mismatches ? el('span', { class: 'dr-mismatch' }, `불일치 ${mismatches}`) : null,
+          mismatches ? el('span', { class: 'dr-mismatch', title: 'AO·Harness 중 하나라도 다른 항목 수' }, `불일치 ${mismatches}`) : null,
         ]),
       ]);
       list.appendChild(button);

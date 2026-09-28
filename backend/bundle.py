@@ -416,10 +416,11 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
             n_missing += 1
         if errors:
             n_error += 1
+        mismatch = sum(1 for r in rows if r.get("ao_status") not in ("", "MATCH") or r.get("harness_status") not in ("", "MATCH"))
         docs.append({
             "id": doc_id, "has": has, "errors": errors, "review": rv,
             "doc_type": _doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"]),
-            "score": sc,
+            "score": sc, "mismatch": mismatch,
         })
 
     def _finish(a: dict) -> dict | None:
