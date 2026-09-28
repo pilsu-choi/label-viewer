@@ -144,6 +144,12 @@ export function charDiff(golden, other) {
   return out.length ? out : [{ text: '', changed: false }];
 }
 
+// compare 엔트리가 AO·Harness 중 하나라도 MATCH 가 아니면 불일치로 본다.
+export function isMismatch(entry) {
+  if (!entry) return false;
+  return (entry.ao_status && entry.ao_status !== 'MATCH') || (entry.harness_status && entry.harness_status !== 'MATCH');
+}
+
 export function pathKey(docIdx, area, container, key) {
   if (area === 'field') return `documents[${docIdx}].fields[${key}]`;
   if (area === 'group') return `documents[${docIdx}].groups[${container}].fields[${key}]`;

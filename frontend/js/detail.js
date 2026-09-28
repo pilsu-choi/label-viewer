@@ -1,4 +1,4 @@
-import { el, clear, mount, toast, isEditingTarget, icon, menuButton } from './util.js';
+import { el, clear, mount, toast, isEditingTarget, isMismatch, icon, menuButton } from './util.js';
 import { api } from './api.js';
 import { navigate, setNavGuard } from './router.js';
 import { createImageViewer } from './imageViewer.js';
@@ -66,7 +66,7 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function jumpNextMismatch() {
-    const entries = (doc.compare || []).filter((e) => (e.ao_status && e.ao_status !== 'MATCH') || (e.harness_status && e.harness_status !== 'MATCH'));
+    const entries = (doc.compare || []).filter(isMismatch);
     if (!entries.length) { toast('불일치 항목이 없습니다.'); return; }
     state.mismatchCursor = (state.mismatchCursor + 1) % entries.length;
     setTab('compare');
@@ -161,7 +161,7 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function updateTabCounts() {
-    const mismatchCount = (doc.compare || []).filter((e) => (e.ao_status && e.ao_status !== 'MATCH') || (e.harness_status && e.harness_status !== 'MATCH')).length;
+    const mismatchCount = (doc.compare || []).filter(isMismatch).length;
     const btn = tabButtons.compare;
     if (btn) { clear(btn); btn.appendChild(document.createTextNode('비교')); if (mismatchCount) btn.appendChild(el('span', { class: 'count' }, String(mismatchCount))); }
   }
