@@ -28,6 +28,53 @@ function mismatchOf(entry) {
   return (entry.ao_status && entry.ao_status !== 'MATCH') || (entry.harness_status && entry.harness_status !== 'MATCH');
 }
 
+// 행 좌측 상태 바: 불일치 > Golden 빈 값(경고) > 없음(일치)
+function rowStateClass(value, entry) {
+  if (mismatchOf(entry)) return 'mismatch';
+  if (value == null || value === '') return 'warn';
+  return '';
+}
+
+// key 처럼 실수로 바뀌면 안 되는 입력: 기본 readOnly, 더블클릭/Enter 로 편집, blur/Enter 로 종료
+function keyInput(value, ariaLabel, onChange) {
+  const enterEdit = (e) => { e.target.readOnly = false; e.target.focus(); e.target.select(); };
+  return el('input', {
+    type: 'text', value, readOnly: true, 'aria-label': ariaLabel,
+    ondblclick: enterEdit,
+    onkeydown: (e) => {
+      if (e.key !== 'Enter') return;
+      if (e.target.readOnly) { e.preventDefault(); enterEdit(e); } else { e.target.blur(); }
+    },
+    oninput: (e) => onChange(e.target.value),
+    onblur: (e) => { e.target.readOnly = true; },
+  });
+}
+
+// AO/Harness 비교값 칩. 둘 다 없으면 null(칩 줄 자체를 렌더하지 않음). 값이 같으면 칩 하나로 합친다.
+function sourceChips(entry, onAdopt) {
+  if (!entry) return null;
+  const ao = entry.ao === '' || entry.ao == null ? null : String(entry.ao);
+  const harness = entry.harness === '' || entry.harness == null ? null : String(entry.harness);
+  if (ao == null && harness == null) return null;
+  const items = (ao != null && harness != null && ao === harness)
+    ? [['AO·Harness', ao, null]]
+    : [['AO', entry.ao, entry.ao_status], ['Harness', entry.harness, entry.harness_status]];
+  return el('div', { class: 'gs-compare' }, items.map(([label, value, status]) => {
+    const available = value != null && value !== '';
+    const off = status && status !== 'MATCH';
+    return el('button', {
+      class: `gs-chip ${off ? 'is-off' : ''}`,
+      type: 'button', disabled: !available,
+      title: available ? `${label} 값을 Golden에 채택` : `${label} 값 없음`,
+      onclick: () => onAdopt(value),
+    }, [
+      el('span', { class: 'cap' }, label),
+      el('span', { class: 'val' }, available ? String(value) : '—'),
+      off ? el('span', { class: 'stat' }, statusLabel(status)) : null,
+    ]);
+  }));
+}
+
 function findOrPush(arr, key, make) {
   let it = arr.find((x) => x.key === key);
   if (!it) { it = make(); arr.push(it); }
@@ -203,34 +250,24 @@ export function createGoldenEditor(host, opts) {
   function cellRow(cell, path, onDelete) {
     if (!cell.dtype) cell.dtype = 'string';
     const entry = cmap.get(path);
-    const row = el('div', { class: `field-row ${mismatchOf(entry) ? 'mismatch' : ''}`, tabindex: '0', dataset: { path } }, [
-      el('input', { type: 'text', value: cell.key, 'aria-label': 'key', oninput: (e) => { cell.key = e.target.value; markDirty(); } }),
+    const row = el('div', { class: `field-row ${rowStateClass(cell.value, entry)}`, tabindex: '0', dataset: { path } }, [
+      keyInput(cell.key, 'key', (v) => { cell.key = v; markDirty(); }),
       el('div', { class: 'cell-wrap', ...tipHandlers(path) },
-        el('input', { type: 'text', value: cell.value == null ? '' : cell.value, oninput: (e) => { cell.value = e.target.value; markDirty(); } })),
+        el('input', { type: 'text', value: cell.value == null ? '' : cell.value, placeholder: '값 없음',
+          oninput: (e) => { cell.value = e.target.value; markDirty(); } })),
       el('select', { onchange: (e) => { cell.dtype = e.target.value; markDirty(); } },
         DTYPES.map((t) => el('option', { value: t, selected: t === cell.dtype }, t))),
       el('button', { class: 'field-row-del', title: '삭제', 'aria-label': '삭제', onclick: () => onDelete() }, icon('x')),
     ]);
-    if (entry) {
-      const sources = [['AO', entry.ao, entry.ao_status], ['Harness', entry.harness, entry.harness_status]];
+    const chips = sourceChips(entry, (value) => {
+      applyAdopt(golden, entry, value); markDirty();
+      rerenderAt((h) => Array.from(h.querySelectorAll('.field-row')).find((r) => r.dataset.path === path), null, false);
+    });
+    if (chips) {
+      const th = tipHandlers(path);
+      for (const [k, fn] of Object.entries(th)) chips.addEventListener(k.slice(2), fn);
       row.classList.add('has-sources');
-      row.appendChild(el('div', { class: 'gs-compare', ...tipHandlers(path) }, sources.map(([label, value, status]) => {
-        const available = value != null && value !== '';
-        const off = status && status !== 'MATCH';
-        return el('button', {
-          class: `gs-chip ${off ? 'is-off' : ''}`,
-          type: 'button', disabled: !available,
-          title: available ? `${label} 값을 Golden에 채택` : `${label} 값 없음`,
-          onclick: () => {
-            applyAdopt(golden, entry, value); markDirty();
-            rerenderAt((h) => Array.from(h.querySelectorAll('.field-row')).find((r) => r.dataset.path === path), null, false);
-          },
-        }, [
-          el('span', { class: 'cap' }, label),
-          el('span', { class: 'val' }, available ? String(value) : '—'),
-          off ? el('span', { class: 'stat' }, statusLabel(status)) : null,
-        ]);
-      })));
+      row.appendChild(chips);
     }
     return row;
   }
@@ -264,6 +301,7 @@ export function createGoldenEditor(host, opts) {
     d0.extracted_groups.forEach((g, gi) => {
       if (!g.fields) g.fields = [];
       const collapsed = collapsedGroups.has(gi);
+      const mismatchCount = g.fields.reduce((n, cell) => n + (mismatchOf(cmap.get(`documents[0].groups[${g.key}].fields[${cell.key}]`)) ? 1 : 0), 0);
       const fieldsHost = el('div', { class: `group-fields ${collapsed ? 'collapsed' : ''}` });
       g.fields.forEach((cell, fi) => {
         fieldsHost.appendChild(cellRow(cell, `documents[0].groups[${g.key}].fields[${cell.key}]`, () => { g.fields.splice(fi, 1); markDirty(); rerenderAt(); }));
@@ -272,7 +310,8 @@ export function createGoldenEditor(host, opts) {
       body.appendChild(el('div', { class: 'group-block' }, [
         el('div', { class: 'group-head' }, [
           el('button', { class: 'chev', onclick: () => { collapsed ? collapsedGroups.delete(gi) : collapsedGroups.add(gi); rerenderAt(); } }, icon(collapsed ? 'chevron-right' : 'chevron-down')),
-          el('input', { type: 'text', value: g.key, oninput: (e) => { g.key = e.target.value; markDirty(); } }),
+          keyInput(g.key, '그룹 이름', (v) => { g.key = v; markDirty(); }),
+          mismatchCount ? el('span', { class: 'badge badge-bad', title: `불일치 ${mismatchCount}건` }, String(mismatchCount)) : null,
           el('button', { class: 'field-row-del', title: '그룹 삭제', onclick: () => { d0.extracted_groups.splice(gi, 1); markDirty(); rerenderAt(); } }, icon('x')),
         ]),
         fieldsHost,
