@@ -15,11 +15,15 @@ status: active
 
 ### Creation
 
+- [Label Viewer 비교 탭 사용성 개선](2026-09-29-compare-tab-usability.md): 비교 탭 점검 결과와 채택 흐름·개수 기준·Golden 없음 수정, 기본 불일치 필터, 셀 채택, 두 탭 공용 상태 색, 근거 팝오버, 표 행 묶기, 소스 필터·검색, 키보드 조작 기록.
 - [Label Viewer 편집 탭 버그 수정·사용성 개선](2026-09-29-edit-tab-usability.md): 편집 탭 점검 결과, 버그 4건 수정, 필드 행·표 셀 상태 표시, 재구성 패널 접기, 불일치 개수 기준 통일과 편집 탭 안 이동 기록.
 - [Label Viewer 상세 화면 레이아웃·그리드·스크롤 개선](2026-09-29-label-viewer-layout-grid.md): 패널 접기, 이미지 동적 재조정, 편집·재구성 그리드, 비교 근거 스크롤, 추가 시 스크롤 유지 기록.
 
 ### Update
 
+- [README](../README.md): 비교 탭 기본 불일치 필터·소스 필터·검색·셀 채택·저장 대기·상태 색·행 묶기·근거 위치와 비교 탭 키보드(`↑/↓`, `A`/`H`, `Enter`) 안내 반영.
+- [Label Viewer 편집 탭 버그 수정·사용성 개선](2026-09-29-edit-tab-usability.md): 남은 과제였던 상태 색 의미 재정의가 비교 탭 작업에서 반영됐음을 기록.
+- [wiki/index.md](index.md): 비교 탭 사용성 개선 문서 링크 추가.
 - [README](../README.md): 편집 탭 요약·불일치 이동(`M`/`Shift+M`), 재구성 패널 접기, key 더블클릭 편집, 표 셀 채택 안내 반영.
 - [wiki/index.md](index.md): 편집 탭 사용성 개선 문서 링크 추가.
 

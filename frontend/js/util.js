@@ -150,6 +150,24 @@ export function isMismatch(entry) {
   return (entry.ao_status && entry.ao_status !== 'MATCH') || (entry.harness_status && entry.harness_status !== 'MATCH');
 }
 
+// 소스(AO/Harness) 중 하나라도 값이 있는지.
+export function hasSourceValue(entry) {
+  return !!(entry && ((entry.ao != null && entry.ao !== '') || (entry.harness != null && entry.harness !== '')));
+}
+
+// 비교 탭 행/셀과 편집 탭 행/셀이 공유하는 상태 판정. entry(compare 엔트리)와 현재 Golden 값을 받아
+// 'bad'(값 불일치) | 'warn'(Golden 이 비어서 생긴 차이) | 'weak'(한쪽 소스만 누락/추가) | ''(일치) 중 하나를 돌려준다.
+// Golden 이 비어서 생긴 EXTRA 는 소스가 틀린 게 아니므로 bad 가 아니라 warn 으로 약하게 표시한다.
+export function entryState(entry, goldenValue) {
+  if (!entry) return '';
+  const statuses = [entry.ao_status, entry.harness_status];
+  if (statuses.some((s) => s === 'MISMATCH' || s === 'TYPE_MISMATCH')) return 'bad';
+  const goldenEmpty = goldenValue == null || goldenValue === '';
+  if (goldenEmpty && hasSourceValue(entry)) return 'warn';
+  if (statuses.some((s) => s && s !== 'MATCH')) return 'weak';
+  return '';
+}
+
 export function pathKey(docIdx, area, container, key) {
   if (area === 'field') return `documents[${docIdx}].fields[${key}]`;
   if (area === 'group') return `documents[${docIdx}].groups[${container}].fields[${key}]`;
@@ -158,7 +176,7 @@ export function pathKey(docIdx, area, container, key) {
 
 // ── 공용 UI 조각 ─────────────────────────────────────────────
 export const STATUSES = ['MATCH', 'MISMATCH', 'MISSING', 'EXTRA', 'TYPE_MISMATCH'];
-const STATUS_TONE = { MATCH: 'ok', MISMATCH: 'bad', MISSING: 'warn', EXTRA: 'extra', TYPE_MISMATCH: 'type' };
+export const STATUS_TONE = { MATCH: 'ok', MISMATCH: 'bad', MISSING: 'warn', EXTRA: 'extra', TYPE_MISMATCH: 'type' };
 
 export function statusBadge(status) {
   return el('span', { class: `badge badge-${STATUS_TONE[status] || 'muted'}`, title: statusDescription(status) }, status ? statusLabel(status) : '—');

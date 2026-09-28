@@ -510,8 +510,10 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 
 .field-row { position: relative; padding: 2px var(--sp-1); border-radius: var(--r-sm); }
 .field-row:hover { background: var(--surface-2); }
-.field-row.mismatch::before, .field-row.warn::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--bad); z-index: 1; }
+/* 행 좌측 상태 바: bad(값 불일치) > warn(Golden 빈 값) > weak(한쪽 소스만 누락/추가) — util.entryState 기준 */
+.field-row.bad::before, .field-row.warn::before, .field-row.weak::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--bad); z-index: 1; }
 .field-row.warn::before { background: var(--warn); }
+.field-row.weak::before { background: var(--line-strong); }
 .field-row.flash { background: var(--hl-soft); transition: background .6s; }
 .field-row input[type="text"] { width: 100%; height: var(--h-sm); border-color: transparent; background: transparent; font-size: var(--fs-md); }
 .field-row .cell-wrap input[type="text"] { border-color: var(--line); }
@@ -539,7 +541,7 @@ select.fr-dtype {
 .fr-compare { display: contents; }
 .fr-ao { grid-area: ao; } .fr-harness { grid-area: harness; }
 .fr-ao, .fr-harness { min-width: 0; padding: 0 var(--sp-1); border-radius: var(--r-sm); }
-.fr-ao.is-off, .fr-harness.is-off { background: color-mix(in srgb, var(--bad-soft) 55%, transparent); }
+.fr-ao.is-bad, .fr-harness.is-bad { background: color-mix(in srgb, var(--bad-soft) 55%, transparent); }
 .fr-dash { display: block; padding: 1px var(--sp-1); color: var(--ink-3); font-size: var(--fs-sm); }
 .field-row-del {
   display: grid; place-items: center; width: var(--h-sm); height: var(--h-sm); border: 0; border-radius: var(--r-sm);
@@ -557,7 +559,8 @@ select.fr-dtype {
 .gs-chip:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--accent); }
 .gs-chip .val { min-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .gs-chip .stat { display: none; flex: none; color: var(--ink-3); font-size: var(--fs-xs); }
-.gs-chip.is-off .val { color: var(--bad); }
+.gs-chip.st-bad .val { color: var(--bad); }
+.gs-chip.st-weak .val { color: var(--ink-3); }
 .gs-tip-evidence { display: block; padding-top: var(--sp-1); margin-top: var(--sp-1); border-top: 1px solid var(--line); color: var(--ink-2); }
 
 /* 좁은 패널(~640px 미만): AO/Harness 컬럼을 없애고 값 아래 칩 줄로 되돌린다 */
@@ -603,9 +606,10 @@ select.fr-dtype {
 /* 행번호 열 고정(가로 스크롤 시), 머리글 고정(세로 스크롤 시) — 왼쪽 위 모서리 셀은 z-index 로 둘 다 위에 */
 .gs-table td.rowhandle, .gs-table th.rowhandle { position: sticky; left: 0; z-index: 1; }
 .gs-table thead th.rowhandle { z-index: 3; }
-/* 불일치/빈 값 셀 배경 — 필드 행과 같은 색 체계(--bad-soft/--warn-soft). hover 배경보다 뒤에 두어 우선한다 */
-.gs-table tbody tr td.mismatch { background: var(--bad-soft); }
+/* 불일치/빈 값 셀 배경 — 필드 행과 같은 색 체계(util.entryState: bad/warn/weak). hover 배경보다 뒤에 두어 우선한다 */
+.gs-table tbody tr td.bad { background: var(--bad-soft); }
 .gs-table tbody tr td.warn { background: var(--warn-soft); }
+.gs-table tbody tr td.weak { background: color-mix(in srgb, var(--line-strong) 35%, transparent); }
 .gs-table tbody tr td.flash { background: var(--hl-soft); transition: background .6s; }
 .gs-col-head { position: relative; display: flex; align-items: center; }
 .gs-col-head:hover input[type="text"], .gs-col-head:focus-within input[type="text"] { padding-right: 23px; }
@@ -654,42 +658,72 @@ select.fr-dtype {
 .json-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font: var(--fs-xs)/1 var(--font-code); }
 
 /* 비교 */
-.cmp-toolbar { margin-bottom: var(--sp-3); }
+.cmp-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.cmp-search { flex: none; width: 200px; height: var(--h-sm); font-size: var(--fs-sm); }
 .seg .seg-count { margin-left: 6px; padding: 0 5px; border-radius: 999px; background: var(--surface); color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
 .seg .seg-count.bad { background: var(--bad-soft); color: var(--bad); }
-.cmp-score-cards { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); padding: var(--sp-3) var(--sp-1); margin-bottom: var(--sp-3); background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+/* 점수 요약: 기본은 한 줄(AO/Harness 정확도 + 작은 막대), 클릭하면 scoreCard 상세로 펼친다 */
+.cmp-score-toggle { display: flex; width: 100%; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-1); margin-bottom: var(--sp-1); border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; text-align: left; }
+.cmp-score-toggle:hover { background: var(--surface-2); }
+.cmp-score-toggle .ic { flex: none; width: 14px; height: 14px; color: var(--ink-3); }
+.cmp-score-line { display: flex; flex: 1; align-items: center; gap: var(--sp-4); min-width: 0; font-size: var(--fs-sm); color: var(--ink-2); }
+.cmp-score-mini { display: inline-flex; align-items: center; gap: 6px; }
+.cmp-score-mini b { color: var(--ink); font-weight: 600; }
+.cmp-score-mini-bar { display: inline-flex; width: 56px; height: 5px; border-radius: 3px; overflow: hidden; background: var(--surface-2); }
+.cmp-score-mini-bar i { display: block; height: 100%; min-width: 2px; }
+.cmp-score-cards { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); padding: var(--sp-3) var(--sp-1); margin-bottom: var(--sp-2); background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
 .cmp-table-wrap { flex: 1; min-height: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); overflow: auto; }
-.cmp-table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
-.cmp-table thead th { position: sticky; top: 0; z-index: 3; padding: var(--sp-2) var(--sp-3); background: var(--surface-2); border-bottom: 1px solid var(--line); color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; text-align: left; }
-.cmp-table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); vertical-align: middle; }
+.cmp-table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); table-layout: fixed; }
+.cmp-table thead th { position: sticky; top: 0; z-index: 3; padding: var(--sp-1) var(--sp-3); background: var(--surface-2); border-bottom: 1px solid var(--line); color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; text-align: left; }
+.cmp-table td { padding: var(--sp-1) var(--sp-3); border-bottom: 1px solid var(--line); vertical-align: middle; overflow: hidden; }
+.cmp-table th:first-child, .cmp-table td:first-child { width: 22%; }
+.cmp-table th:nth-child(2), .cmp-table td:nth-child(2) { width: 20%; }
 .cmp-table tbody tr:last-child td { border-bottom: 0; }
-.cmp-table tr.cmp-group td { padding: var(--sp-4) var(--sp-3) var(--sp-2); background: var(--surface); font-size: var(--fs-sm); font-weight: 600; }
+.cmp-table tr.cmp-group td { padding: 3px var(--sp-3); background: var(--surface); font-size: var(--fs-sm); font-weight: 600; }
 .cmp-group .kind { margin-right: var(--sp-2); padding: 1px 6px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
-.cmp-table tr.is-off td:first-child { box-shadow: inset 2px 0 0 var(--bad); }
+/* 표 항목의 #행 소그룹 헤더: 행 번호·대표 값(첫 열)·불일치 수, 클릭/Enter·Space 로 접고 편다 */
+.cmp-table tr.cmp-rowgroup td { padding: 3px var(--sp-3) 3px var(--sp-6); background: var(--surface-2); cursor: pointer; }
+.cmp-table tr.cmp-rowgroup:hover td { background: var(--line); }
+.cmp-rowgroup-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.cmp-rowgroup-head .ic { flex: none; width: 14px; height: 14px; color: var(--ink-3); }
+.cmp-rowgroup-num { flex: none; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600; }
+.cmp-rowgroup-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-weight: 400; }
+/* 행 상태(util.entryState): bad(값 불일치) > warn(Golden 빈 값) > weak(한쪽 소스만 누락/추가) */
+.cmp-table tr.bad td:first-child { box-shadow: inset 2px 0 0 var(--bad); }
+.cmp-table tr.warn td:first-child { box-shadow: inset 2px 0 0 var(--warn); }
+.cmp-table tr.weak td:first-child { box-shadow: inset 2px 0 0 var(--line-strong); }
+.cmp-golden-warn { background: color-mix(in srgb, var(--warn-soft) 70%, transparent); }
 .cmp-table tbody tr:not(.cmp-group):hover td { background: var(--surface-2); }
+.cmp-table tr.is-pending td, .cmp-table tr.is-pending:hover td { background: var(--accent-soft); }
+.badge-pending { background: var(--accent-soft); color: var(--accent-ink); }
 .cmp-table tr.flash td { background: var(--hl); color: #18212e; transition: background .6s; }
-.cmp-key { font-weight: 600; }
-.cmp-row { margin-right: 6px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
-.cmp-val { word-break: break-word; }
+.cmp-item { display: flex; align-items: baseline; min-width: 0; }
+.cmp-key { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.cmp-row { flex: none; margin-right: 6px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
+.cmp-val { overflow-wrap: break-word; }
 .cmp-cell { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .diff-add { padding: 0 1px; border-radius: var(--r-sm); background: var(--bad-soft); color: var(--bad); font-weight: 600; }
-.cmp-adopt { width: 1%; text-align: right; white-space: nowrap; opacity: 0; transition: opacity .1s; }
-.cmp-adopt .btn + .btn { margin-left: var(--sp-1); }
-.cmp-table tr:hover .cmp-adopt, .cmp-adopt:focus-within { opacity: 1; }
+/* AO/Harness 값 셀 자체가 채택 버튼(.gs-chip 재사용, cmp-chip 은 가로 배치로 오버라이드) */
+.cmp-chip { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--sp-2); height: auto; min-height: 20px; padding: 1px var(--sp-1); }
 
 .evidence-pop {
   position: fixed; z-index: 300; width: 360px; max-height: min(60vh, 420px); overflow: auto; overscroll-behavior: contain; padding: var(--sp-4);
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-pop); font-size: var(--fs-sm);
 }
 .evidence-pop.pinned { border-color: var(--accent); }
+.evidence-pop .ev-loc { font-size: var(--fs-sm); font-weight: 600; color: var(--ink); word-break: break-word; }
 .evidence-pop h5 { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-sm); font-weight: 600; color: var(--ink); }
-.evidence-pop h5:first-child { margin-top: 0; }
+.evidence-pop h5:first-child { margin-top: var(--sp-2); }
 .evidence-pop .ev-row { display: flex; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-1) 0; border-bottom: 1px solid var(--line); }
 .evidence-pop .ev-row > :first-child { flex: none; color: var(--ink-3); }
 .evidence-pop .ev-row > :last-child { text-align: right; word-break: break-all; }
 .evidence-pop table { width: 100%; margin: var(--sp-1) 0 var(--sp-2); border-collapse: collapse; }
 .evidence-pop th, .evidence-pop td { padding: 5px 6px; border-bottom: 1px solid var(--line); font-size: var(--fs-sm); text-align: left; }
 .evidence-pop th { color: var(--ink-3); font-weight: 600; }
+.evidence-pop .ev-detail { margin-top: var(--sp-3); padding-top: var(--sp-2); border-top: 1px solid var(--line); }
+.evidence-pop .ev-detail summary { cursor: pointer; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
+.evidence-pop .ev-path { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 0; }
+.evidence-pop .ev-path .mono { min-width: 0; word-break: break-all; }
 
 /* 재구성 보기 — 편집기 그리드와 같은 톤: 라벨 열 tint, 행 구분선, 표는 헤더+줄무늬 */
 .rc-dl {
