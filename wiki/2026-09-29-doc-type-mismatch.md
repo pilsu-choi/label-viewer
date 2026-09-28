@@ -62,6 +62,8 @@ dummy2 확인: D2-DET-001은 기본 종류가 세부내역서로 잡히고, AO�
 
 브라우저로 확인하니 분류 오답 배지 추가 뒤 상세 화면이 `appendChild ... not of type 'Node'` 오류로 열리지 않았다. `classBadges()`가 배지 배열을 돌려주는데 `el()`이 자식 배열을 한 단계만 펼쳤기 때문이다. `el()`이 `[children].flat(Infinity)`로 중첩 배열을 펼치게 고쳤고, 문서 유형 select가 입력칸처럼 줄 폭을 채우도록 CSS를 맞췄다. 수정 뒤 목록(분류 요약·배지)과 상세(헤더 배지, 문서 유형 select 기본값 세부내역서)가 정상 표시됨을 확인했다.
 
+수정 뒤에도 사용자 브라우저에서 선택칸이 보이지 않았다. 정적 파일에 `Cache-Control`이 없어 브라우저가 예전 JS 모듈을 재검증 없이 쓴 것으로 보고, `/`와 `/static`에 `Cache-Control: no-cache`를 붙였다(`fix/static-no-cache`, ETag 기반 304 재검증은 유지).
+
 ## 남은 과제
 
 - Harness 재분류가 제목을 못 읽은 오분류(`kept`)는 검수자가 문서 종류를 고쳐야 드러난다.
