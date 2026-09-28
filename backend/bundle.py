@@ -15,7 +15,7 @@ from typing import Any, BinaryIO
 from PIL import Image, ImageSequence
 
 from .compare import compare_bundle, harness_value, score
-from .doctype import DOC_TYPES, apply_template, canon, classified
+from .doctype import DOC_TYPES, apply_template, canon, classified, label
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 JSON_KINDS = ("ao_extract", "harness", "golden", "ao_ui")
@@ -390,7 +390,7 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
         "has": has,
         "errors": errors,
         "review": (state.get("review") or {}).get(doc_id, ""),
-        "doc_type": _doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"]),
+        "doc_type": label(_doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"])),
         "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
         "doc_type_suggest": _doc_type_suggest(parsed),
         "doc_types": DOC_TYPES,
@@ -455,7 +455,7 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
         mismatch = sum(1 for r in rows if r.get("ao_status") not in ("", "MATCH") or r.get("harness_status") not in ("", "MATCH"))
         docs.append({
             "id": doc_id, "has": has, "errors": errors, "review": rv,
-            "doc_type": _doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"]),
+            "doc_type": label(_doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"])),
             "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
             "classification": cls, "score": sc, "mismatch": mismatch,
         })
