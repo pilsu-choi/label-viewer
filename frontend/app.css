@@ -518,9 +518,10 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .json-viewer { display: flex; flex: 1; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
 .json-search-wrap { position: relative; flex: none; width: min(320px, 50%); }
 .json-search-wrap .ic { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
-.json-search { width: 100%; height: var(--h-md); padding: 0 var(--sp-2) 0 28px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: var(--fs-sm); }
+.json-search-wrap .json-search { width: 100%; height: var(--h-md); padding: 0 var(--sp-2) 0 28px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: var(--fs-sm); }
 .json-count { flex: none; color: var(--ink-3); font-size: var(--fs-xs); white-space: nowrap; }
 .json-tree { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-2) 0; background: var(--surface); font: var(--fs-sm)/20px var(--font-code); }
+.json-tree .empty { font-family: var(--font); }
 .json-row { display: flex; align-items: baseline; gap: 4px; height: 20px; padding-right: var(--sp-3); white-space: nowrap; cursor: pointer; }
 .json-row:hover { background: var(--surface-2); }
 .json-row.selected { background: var(--accent-soft); }
