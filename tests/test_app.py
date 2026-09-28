@@ -433,7 +433,9 @@ def test_classification_grading(client: TestClient):
     assert docs["OK"]["classification"] == {"ao": True, "harness": True}
     assert docs["BAD"]["classification"] == {"ao": False, "harness": True}
     assert docs["NOGOLD"]["classification"] == {"ao": None, "harness": None}
-    assert client.get(f"/api/bundles/{bid}/docs/BAD").json()["classification"] == {"ao": False, "harness": True}
+    bad = client.get(f"/api/bundles/{bid}/docs/BAD").json()
+    assert bad["classification"] == {"ao": False, "harness": True}
+    assert bad["doc_type_by_source"] == {"golden": "세부내역서", "ao": "진료비영수증 (AC02922011)", "harness": "진료비세부산정내역서"}
     summ = client.get(f"/api/bundles/{bid}").json()["summary"]
     assert summ["classification"]["ao"] == {"correct": 1, "total": 2, "accuracy": 0.5}
     assert summ["classification"]["harness"]["accuracy"] == 1.0

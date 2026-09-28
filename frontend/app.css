@@ -689,6 +689,7 @@ select.fr-dtype {
 .cmp-rowgroup-num { flex: none; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600; }
 .cmp-rowgroup-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-weight: 400; }
 /* 행 상태(util.entryState): bad(값 불일치) > warn(Golden 빈 값) > weak(한쪽 소스만 누락/추가) */
+.cmp-table tr.cmp-doctype td { background: var(--surface-2); }
 .cmp-table tr.bad td:first-child { box-shadow: inset 2px 0 0 var(--bad); }
 .cmp-table tr.warn td:first-child { box-shadow: inset 2px 0 0 var(--warn); }
 .cmp-table tr.weak td:first-child { box-shadow: inset 2px 0 0 var(--line-strong); }

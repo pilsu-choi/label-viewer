@@ -261,6 +261,21 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
     }
   }
 
+  // 문서 유형 비교 행(항목 목록 밖, 점수와 무관). 분류 일치 여부를 MATCH/MISMATCH 상태로 옮겨 같은 필터·배지를 쓴다.
+  function docTypeRow() {
+    const cls = doc.classification || {};
+    const st = (k) => (cls[k] == null ? null : cls[k] ? 'MATCH' : 'MISMATCH');
+    const e = { ao_status: st('ao'), harness_status: st('harness') };
+    if (state.search.trim() || !matchesFilter(e, state.filter, state.source)) return null;
+    const by = doc.doc_type_by_source || {};
+    const cell = (k) => el('td', {}, el('div', { class: 'cmp-cell' }, [el('span', { class: 'cmp-val' }, by[k] || '—'), statusBadge(e[`${k}_status`])]));
+    return el('tr', { class: `cmp-doctype ${[e.ao_status, e.harness_status].includes('MISMATCH') ? 'bad' : ''}`.trim(), title: "문서 종류는 편집 탭의 '문서 유형'에서 바꿉니다" }, [
+      el('td', {}, el('span', { class: 'cmp-key' }, '문서 유형')),
+      el('td', {}, el('span', { class: 'cmp-val' }, by.golden || '—')),
+      cell('ao'), cell('harness'),
+    ]);
+  }
+
   function buildEntryRow(e) {
     const isPending = pending.has(e.path);
     const pendingVal = pending.get(e.path);
@@ -377,10 +392,11 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
     }
 
     const tableWrap = el('div', { class: 'cmp-table-wrap' });
-    if (!filtered.length) {
+    const typeRow = docTypeRow();
+    if (!filtered.length && !typeRow) {
       tableWrap.appendChild(el('div', { class: 'empty-state' }, '표시할 항목이 없습니다.'));
     } else {
-      const tbody = el('tbody');
+      const tbody = el('tbody', {}, typeRow);
       for (const [gk, rows] of groups) {
         const [area, container] = gk.split('::');
         const kind = { field: '필드', group: '그룹', table: '표' }[area];
