@@ -17,11 +17,12 @@ function writeFocusMode(mode) { try { localStorage.setItem('lv.bboxMode', mode);
 
 function readFlag(key) { try { return localStorage.getItem(key) === '1'; } catch { return false; } }
 function writeFlag(key, val) { try { localStorage.setItem(key, val ? '1' : '0'); } catch {} }
-const RECON_HEIGHT_DEFAULT = 220;
-function readReconHeight() {
-  try { const n = Number(localStorage.getItem('lv.reconHeight')); return n >= 90 ? n : RECON_HEIGHT_DEFAULT; } catch { return RECON_HEIGHT_DEFAULT; }
+const RECON_RATIO_MIN = 0.15, RECON_RATIO_MAX = 0.7;
+const clampRatio = (r, lo, hi) => Math.min(Math.max(r, lo), hi);
+function readReconRatio() {
+  try { const n = Number(localStorage.getItem('lv.reconRatio')); return n ? clampRatio(n, RECON_RATIO_MIN, RECON_RATIO_MAX) : 0.3; } catch { return 0.3; }
 }
-function writeReconHeight(h) { try { localStorage.setItem('lv.reconHeight', String(Math.round(h))); } catch {} }
+function writeReconRatio(r) { try { localStorage.setItem('lv.reconRatio', r.toFixed(3)); } catch {} }
 
 export function renderDetail(root, bundleId, docId) {
   const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), railCollapsed: readFlag('lv.railCollapsed'), panelCollapsed: readFlag('lv.panelCollapsed'), reconCollapsed: readFlag('lv.reconCollapsed') };
@@ -334,7 +335,7 @@ export function renderDetail(root, bundleId, docId) {
       class: 'btn ghost icon sm', title: state.reconCollapsed ? '펼치기' : '접기', 'aria-label': '재구성 패널 접기/펼치기',
       onclick: toggleReconCollapse,
     }, icon(state.reconCollapsed ? 'chevron-right' : 'chevron-down'));
-    const reconPanel = el('div', { class: `recon-panel ${state.reconCollapsed ? 'collapsed' : ''}`, style: state.reconCollapsed ? '' : `height:${readReconHeight()}px` }, [
+    const reconPanel = el('div', { class: `recon-panel ${state.reconCollapsed ? 'collapsed' : ''}`, style: `--recon-ratio:${readReconRatio()}` }, [
       el('div', { class: 'panel-head recon-toolbar' }, [
         reconCollapseBtn,
         el('span', { class: 'label' }, '재구성 보기'),
@@ -347,15 +348,14 @@ export function renderDetail(root, bundleId, docId) {
       state.reconCollapsed = !state.reconCollapsed;
       writeFlag('lv.reconCollapsed', state.reconCollapsed);
       reconPanel.classList.toggle('collapsed', state.reconCollapsed);
-      reconPanel.style.height = state.reconCollapsed ? '' : `${readReconHeight()}px`;
       vsplit.style.display = state.reconCollapsed ? 'none' : '';
       reconCollapseBtn.title = state.reconCollapsed ? '펼치기' : '접기';
       clear(reconCollapseBtn); reconCollapseBtn.appendChild(icon(state.reconCollapsed ? 'chevron-right' : 'chevron-down'));
     }
 
     let dragging = false, startY = 0, startH = 0;
-    const onVMove = (e) => { if (!dragging) return; const h = Math.min(Math.max(90, startH - (e.clientY - startY)), rightPanel.clientHeight - 120); reconPanel.style.height = `${h}px`; };
-    const onVUp = () => { if (dragging) writeReconHeight(reconPanel.getBoundingClientRect().height); dragging = false; vsplit.classList.remove('active'); };
+    const onVMove = (e) => { if (dragging) reconPanel.style.setProperty('--recon-ratio', clampRatio((startH - (e.clientY - startY)) / rightPanel.clientHeight, RECON_RATIO_MIN, RECON_RATIO_MAX)); };
+    const onVUp = () => { if (dragging) writeReconRatio(Number(reconPanel.style.getPropertyValue('--recon-ratio'))); dragging = false; vsplit.classList.remove('active'); };
     vsplit.addEventListener('mousedown', (e) => { e.preventDefault(); dragging = true; startY = e.clientY; startH = reconPanel.getBoundingClientRect().height; vsplit.classList.add('active'); });
     window.addEventListener('mousemove', onVMove);
     window.addEventListener('mouseup', onVUp);
@@ -367,8 +367,8 @@ export function renderDetail(root, bundleId, docId) {
     const onRMove = (e) => {
       if (!rdrag) return;
       const total = leftPanel.parentElement.clientWidth;
-      const w = Math.min(Math.max(280, rStartW + (e.clientX - rStartX)), total - 320);
-      leftPanel.style.width = `${w}px`;
+      const w = clampRatio(rStartW + (e.clientX - rStartX), 280, total - 470);
+      leftPanel.style.width = `${(w / total * 100).toFixed(2)}%`;
     };
     const onRUp = () => { rdrag = false; resizer.classList.remove('active'); };
     resizer.addEventListener('mousedown', (e) => { e.preventDefault(); rdrag = true; rStartX = e.clientX; rStartW = leftPanel.getBoundingClientRect().width; resizer.classList.add('active'); });
