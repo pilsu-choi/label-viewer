@@ -12,7 +12,7 @@ export function el(tag, attrs = {}, children = []) {
     else if (v === true) node.setAttribute(k, '');
     else node.setAttribute(k, v);
   }
-  for (const c of [].concat(children)) {
+  for (const c of [children].flat(Infinity)) {
     if (c == null || c === false) continue;
     node.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
   }
