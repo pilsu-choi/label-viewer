@@ -31,6 +31,18 @@ python3 scripts/make_dummy_bundle.py --out samples/dummy_bundle   # samples/dumm
 | MC005 | 깨진 Harness JSON |
 | DX006 | 이미지만 있음 |
 
+## 실전형 더미 번들 (`dummy2`)
+
+`e2e/표본결과`의 실제 문서 14건을 이미지·원본 AO 응답·Harness 응답·정답지로 묶는다(문서 종류별 2건). 파일명은 D2 별칭으로 바뀌고, 원본 파일 바이트와 JSON 내용은 그대로 복사된다. 별칭 덕분에 원본의 환자 식별자가 번들 파일명에 포함되지 않지만, 이미지와 JSON 본문에는 개인정보와 의료 정보가 남아 있다.
+
+```bash
+python3 scripts/make_dummy2.py --source-root ../e2e/표본결과 --out samples/dummy2
+```
+
+기본 경로는 형제 디렉터리 `../e2e/표본결과`와 `samples/dummy2`이다. 생성물은 `original/`, `ao_extract/`, `harness/`, `golden/` 폴더 및 `samples/dummy2.zip`이다. 전처리 이미지는 이 표본에 없으므로 뷰어의 전처리 버튼은 비활성화된다. AO 파일은 변환된 Harness 입력(`.aiocr.adapted.json`)이 아니라 원본 `.aiocr.json`이고, 정답지는 원본 `.answer.json`이다. 원본 경로와 SHA-256은 `provenance.local.json`에 기록하며 ZIP에는 넣지 않는다.
+
+이 세트는 로컬 검수용이다. 공유하거나 배포하기 전에는 이미지, AO/Harness JSON, 정답지의 식별 정보와 민감 정보를 함께 비식별화해야 한다. 상세한 샘플 목록과 생성 규칙은 [실전형 dummy2 샘플 번들](wiki/2026-09-28-realistic-dummy2.md)을 참고한다.
+
 ## 번들 구조
 
 ```text
@@ -94,7 +106,7 @@ kubectl apply -k deploy/k8s          # PVC(/data) + Deployment(Recreate) + Servi
 ```text
 backend/   app.py(라우트) · bundle.py(업로드·매칭·저장) · compare.py(정규화·비교·채점) · export.py(ZIP·Excel)
 frontend/  index.html · app.css · app.js · js/(upload·list·documentRail·detail·goldenEditor·compare·imageViewer·reconstruct)
-scripts/   make_dummy_bundle.py
+scripts/   make_dummy_bundle.py(합성 자료) · make_dummy2.py(실제 E2E 자료)
 tests/     test_app.py
 deploy/k8s pvc · deployment · service · kustomization
 ```
