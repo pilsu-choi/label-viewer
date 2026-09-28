@@ -9,3 +9,6 @@ tests/
 wiki/
 *.md
 .pytest_cache/
+deploy/
+.env*
+docker-compose.yml

@@ -111,14 +111,40 @@ bundle/
 
 입력창에서 편집하는 중에는 `Ctrl+S`만 동작한다.
 
-## 배포 (Kubernetes)
+## 배포
+
+외부 CDN을 쓰지 않으므로 폐쇄망에서도 동작한다. 번들과 정답지는 `/data` 볼륨에 저장되므로 컨테이너·Pod가 재시작돼도 남는다.
+
+### Docker Compose
+
+```bash
+docker compose up -d --build        # http://127.0.0.1:8765, 데이터는 볼륨 label-viewer_data(/data)
+docker compose logs -f              # 로그
+docker compose down                 # 정지(볼륨 보존, 삭제는 down -v)
+```
+
+`LABEL_VIEWER_BIND`(기본 `127.0.0.1`), `LABEL_VIEWER_PORT`(기본 8765), `LABEL_VIEWER_MAX_UPLOAD_MB`로 바꾼다. 앱에 인증이 없으므로 외부에 열 때는 접근 대역을 제한한다.
+
+### AWS 개발 서버
+
+harness-v2 개발 서버(EC2)에 같은 `docker-compose.yml`로 올린다. 로컬에서 이미지를 빌드해 `docker save`로 반입하고, 서버 루프백에만 바인딩한다.
+
+```bash
+cp deploy/aws/.env.aws.example deploy/aws/.env.aws   # SSH_HOST·SSH_KEY 확인
+deploy/aws/deploy.sh             # 빌드 → 전송 → 기동(헬스체크 대기). --no-build 는 전송·기동만
+deploy/aws/tunnel.sh --bg        # http://localhost:18765 → 서버 127.0.0.1:8765 (--stop 으로 종료)
+deploy/aws/logs.sh               # 로그
+deploy/aws/down.sh               # 정지(볼륨 보존)
+```
+
+서버 경로는 `/mnt/data/label-viewer`(루트 디스크가 작다)다.
+
+### Kubernetes
 
 ```bash
 docker build -t label-viewer:latest .
 kubectl apply -k deploy/k8s          # PVC(/data) + Deployment(Recreate) + Service(80→8765)
 ```
-
-번들과 정답지는 PVC(`/data`)에 저장되므로 Pod가 재시작돼도 남는다. 외부 CDN을 쓰지 않으므로 폐쇄망에서도 동작한다.
 
 ## 구조
 
@@ -127,6 +153,8 @@ backend/   app.py(라우트) · bundle.py(업로드·매칭·저장) · compare.
 frontend/  index.html · app.css · app.js · js/(upload·list·documentRail·detail·goldenEditor·compare·imageViewer·jsonViewer·reconstruct)
 scripts/   make_dummy_bundle.py(합성 자료) · make_dummy2.py(실제 E2E 자료)
 tests/     test_app.py
+docker-compose.yml  단일 컨테이너 배포(로컬·AWS 공용)
+deploy/aws deploy · tunnel · logs · down (AWS 개발 서버)
 deploy/k8s pvc · deployment · service · kustomization
 ```
 
