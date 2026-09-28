@@ -64,7 +64,7 @@ bundle/
 
 상세 화면은 문서 목록, 이미지 뷰어, Golden Set 검수 영역을 하나의 작업 공간에 배치한다. 왼쪽 목록에서 ID·유형을 검색하고 검수 상태로 거를 수 있다. 중앙에서 원본과 전처리 이미지를 확인하며, 우측의 Golden 편집 행에서 AO·Harness 값을 비교하고 바로 채택할 수 있다. 편집 행이나 비교 항목에 마우스를 올리면 비교값·상태·근거가 나타나며 연결된 bbox가 있으면 이미지에 함께 강조된다.
 
-우측의 비교 탭은 mismatch·missing·extra를 필터링하고, Reconstructed View는 Golden·AO·Harness 데이터를 HTML 또는 Markdown으로 보여 준다. 문서 목록과 이미지, 이미지와 검수 패널, 검수 패널과 재구성 뷰 사이의 경계를 끌어 크기를 조절할 수 있다. Golden 편집은 기본적으로 1.5초 뒤 자동 저장된다.
+우측의 비교 탭은 mismatch·missing·extra를 필터링하고, 재구성 보기는 Golden·AO·Harness 데이터를 HTML 또는 Markdown으로 보여 준다. 문서 목록과 이미지, 이미지와 검수 패널, 검수 패널과 재구성 뷰 사이의 경계를 끌어 크기를 조절할 수 있다. Golden 편집은 기본적으로 1.5초 뒤 자동 저장되며, JSON 보기와 Golden 삭제는 편집 패널 상단의 `⋯` 메뉴에 있다.
 
 ## 단축키 (상세 화면)
 
@@ -75,7 +75,7 @@ bundle/
 | `+` / `Delete` | 필드 추가 / 삭제 |
 | `M` | 다음 불일치 항목으로 이동 |
 | `O` | 원본 ↔ 전처리 이미지 |
-| `1` `2` `3` | Reconstructed View 원본을 Golden / AO / Harness로 전환 |
+| `1` `2` `3` | 재구성 보기 원본을 Golden / AO / Harness로 전환 |
 | `?` | 도움말 |
 
 입력창에서 편집하는 중에는 `Ctrl+S`만 동작한다.
@@ -102,5 +102,5 @@ deploy/k8s pvc · deployment · service · kustomization
 ## 보안
 
 - 화면은 값을 `textContent`로만 넣고 `innerHTML`은 쓰지 않는다. 그래서 업로드한 값 안의 HTML·스크립트는 실행되지 않는다.
-- Reconstructed View의 HTML·Markdown 렌더러도 JSON을 바탕으로 DOM을 직접 만든다.
+- 재구성 보기의 HTML·Markdown 렌더러도 JSON을 바탕으로 DOM을 직접 만든다.
 - 업로드 경로는 검사한다. `..`, 절대 경로, zip slip은 거부한다.

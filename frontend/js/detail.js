@@ -65,8 +65,8 @@ export function renderDetail(root, bundleId, docId) {
 
   function openHelp() {
     if (helpOverlay) return;
-    const rows = [['← / →', '이전 / 다음 문서'], ['Ctrl+S', '저장'], ['+', 'Field 추가'], ['Delete', 'Field 삭제'],
-      ['M', '다음 Mismatch'], ['O', '원본/전처리 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'], ['?', '도움말']];
+    const rows = [['← / →', '이전 / 다음 문서'], ['Ctrl+S', '저장'], ['+', '필드 추가'], ['Delete', '필드 삭제'],
+      ['M', '다음 불일치'], ['O', '원본/전처리 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'], ['?', '도움말']];
     helpOverlay = el('div', { class: 'help-overlay', onclick: (e) => { if (e.target === helpOverlay) closeHelp(); } },
       el('div', { class: 'help-card' }, [
         el('h3', {}, '단축키'),
@@ -193,32 +193,32 @@ export function renderDetail(root, bundleId, docId) {
     zoomLabel = el('span', { class: 'zoom-pct' }, '100%');
     const stage = el('div', { class: 'viewer-stage' });
     pageNavEl = el('div', { class: 'page-nav', style: 'display:none' }, [
-      el('button', { class: 'btn sm icon', onclick: () => { state.page--; loadImage(); } }, '‹'),
+      el('button', { class: 'btn sm icon', onclick: () => { state.page--; loadImage(); } }, icon('chevron-left')),
       pageLabel,
-      el('button', { class: 'btn sm icon', onclick: () => { state.page++; loadImage(); } }, '›'),
+      el('button', { class: 'btn sm icon', onclick: () => { state.page++; loadImage(); } }, icon('chevron-right')),
     ]);
-    const viewerToolbar = el('div', { class: 'viewer-toolbar' }, [
+    const viewerToolbar = el('div', { class: 'panel-head viewer-toolbar' }, [
       viewToggle,
       pageNavEl,
       el('div', { class: 'zoom-group' }, [
-        el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomOut(), title: 'Zoom out' }, '−'),
-        el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomIn(), title: 'Zoom in' }, '+'),
+        el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomOut(), title: '축소' }, icon('zoom-out')),
+        el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomIn(), title: '확대' }, icon('zoom-in')),
         zoomLabel,
-        el('button', { class: 'btn sm', onclick: () => imgViewer.fitWidth() }, 'Fit Width'),
-        el('button', { class: 'btn sm', onclick: () => imgViewer.fitPage() }, 'Fit Page'),
+        el('button', { class: 'btn ghost sm', onclick: () => imgViewer.fitWidth() }, '너비 맞춤'),
+        el('button', { class: 'btn ghost sm', onclick: () => imgViewer.fitPage() }, [icon('maximize'), '전체 보기']),
       ]),
     ]);
     leftPanel = el('div', { class: 'detail-left' }, [viewerToolbar, stage]);
     imgViewer = createImageViewer(stage, { onZoomChange: (s) => { zoomLabel.textContent = `${Math.round(s * 100)}%`; } });
 
     // --- 우측: 탭 + 재구성 ---
-    tabButtons.edit = el('button', { class: 'tab-btn active' }, 'Golden Set 편집');
+    tabButtons.edit = el('button', { class: 'tab-btn active' }, '편집');
     tabButtons.compare = el('button', { class: 'tab-btn' }, '비교');
-    tabButtons.raw = el('button', { class: 'tab-btn' }, 'Raw JSON');
+    tabButtons.raw = el('button', { class: 'tab-btn' }, 'JSON');
     tabButtons.edit.addEventListener('click', () => setTab('edit'));
     tabButtons.compare.addEventListener('click', () => setTab('compare'));
     tabButtons.raw.addEventListener('click', () => setTab('raw'));
-    const tabs = el('div', { class: 'tabs' }, [tabButtons.edit, tabButtons.compare, tabButtons.raw]);
+    const tabs = el('div', { class: 'tabs panel-head' }, [tabButtons.edit, tabButtons.compare, tabButtons.raw]);
 
     tabHosts.edit = el('div', { class: 'tab-panel-host' });
     tabHosts.compare = el('div', { class: 'tab-panel-host', style: 'display:none' });
@@ -241,7 +241,7 @@ export function renderDetail(root, bundleId, docId) {
 
     buildRawTab();
 
-    const vsplit = el('div', { class: 'vsplit-handle' });
+    const vsplit = el('div', { class: 'splitter v' });
     reconBody = el('div', { class: 'recon-body' });
     reconSourceButtons.golden = el('button', { class: 'active', onclick: () => setReconSource('golden') }, 'Golden');
     reconSourceButtons.ao = el('button', { onclick: () => setReconSource('ao'), disabled: !doc.has.ao_extract }, 'AO');
@@ -251,8 +251,8 @@ export function renderDetail(root, bundleId, docId) {
       md: el('button', { onclick: () => { state.reconRenderer = 'md'; rendererButtons.md.classList.add('active'); rendererButtons.html.classList.remove('active'); drawRecon(); } }, 'Markdown'),
     };
     const reconPanel = el('div', { class: 'recon-panel', style: 'height:280px' }, [
-      el('div', { class: 'recon-toolbar' }, [
-        el('span', { class: 'label' }, 'Reconstructed View'),
+      el('div', { class: 'panel-head recon-toolbar' }, [
+        el('span', { class: 'label' }, '재구성 보기'),
         el('div', { class: 'seg' }, [reconSourceButtons.golden, reconSourceButtons.ao, reconSourceButtons.harness]),
         el('div', { class: 'seg' }, [rendererButtons.html, rendererButtons.md]),
       ]),
@@ -268,7 +268,7 @@ export function renderDetail(root, bundleId, docId) {
 
     rightPanel = el('div', { class: 'detail-right' }, [tabs, tabHosts.edit, tabHosts.compare, tabHosts.raw, vsplit, reconPanel]);
 
-    const resizer = el('div', { class: 'detail-resizer' });
+    const resizer = el('div', { class: 'splitter h detail-resizer' });
     let rdrag = false, rStartX = 0, rStartW = 0;
     const onRMove = (e) => {
       if (!rdrag) return;
@@ -287,7 +287,7 @@ export function renderDetail(root, bundleId, docId) {
 
     const body = el('div', { class: 'detail-body' }, [leftPanel, resizer, rightPanel]);
     const railHost = el('aside', { class: 'doc-rail', 'aria-label': '문서 목록' });
-    const railResizer = el('div', { class: 'doc-rail-resizer', role: 'separator', 'aria-label': '문서 목록 너비 조절' });
+    const railResizer = el('div', { class: 'splitter h doc-rail-resizer', role: 'separator', 'aria-label': '문서 목록 너비 조절' });
     let railDragging = false;
     const onRailMove = (e) => { if (railDragging) railHost.style.width = `${Math.max(180, Math.min(360, e.clientX - railHost.getBoundingClientRect().left))}px`; };
     const onRailUp = () => { railDragging = false; railResizer.classList.remove('active'); };

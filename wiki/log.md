@@ -15,12 +15,15 @@ status: active
 
 ### Creation
 
+- [Label Viewer UI 마감 품질 개선](2026-09-28-label-viewer-ui-polish.md): 디자인 토큰·공통 컴포넌트·문구 통일과 전 화면 마감 개선 기록.
 - [Label Viewer 상세 검수 Workspace 개편](2026-09-28-label-viewer-review-workspace.md): 문서 레일, 이미지 뷰어, compact Golden 편집, 비교와 재구성 화면의 작업 흐름을 기록.
 - [AO–Harness Golden Set 검수 Viewer](2026-09-28-golden-set-viewer.md): 작업 공간 루트 wiki 문서를 저장소로 복사.
 - [번들 기반 Golden Set 관리 Web App](2026-09-28-bundle-golden-viewer.md): PRD 기반 새 앱 구현 기록.
 
 ### Update
 
+- [README](../README.md): 재구성 보기 명칭과 편집 패널 `⋯` 메뉴(JSON 보기, Golden 삭제) 안내 반영.
+- [wiki/index.md](index.md): UI 마감 품질 개선 문서 링크 추가.
 - [README](../README.md): 상세 검수 Workspace 구성과 기존 키보드 단축키 안내를 최신 UI에 맞게 갱신.
 - [wiki/index.md](index.md): 상세 검수 Workspace 문서 링크 추가.
 - [AO–Harness Golden Set 검수 Viewer](2026-09-28-golden-set-viewer.md): 새 앱으로 대체되어 `status: deprecated` 로 표시.

@@ -197,9 +197,9 @@ export function icon(name) {
 
 // 내보내기 같은 드롭다운. 팝업은 상단 바 스크롤에 잘리지 않게 fixed 로 버튼 아래에 붙인다.
 // 바깥 클릭으로 닫기는 각 화면이 '.export-pop' 을 숨겨 처리한다.
-export function menuButton(label, items) {
+export function menuButton(label, items, iconName = 'download', extraClass = '') {
   const pop = el('div', { class: 'export-pop', style: 'display:none' }, items);
-  return el('div', { class: 'btn menu-btn', onclick: (e) => {
+  return el('div', { class: `btn menu-btn ${extraClass}`.trim(), 'aria-label': label || '더 보기', onclick: (e) => {
     e.stopPropagation();
     const open = pop.style.display !== 'block';
     pop.style.display = open ? 'block' : 'none';
@@ -207,5 +207,5 @@ export function menuButton(label, items) {
       const r = e.currentTarget.getBoundingClientRect();
       Object.assign(pop.style, { top: `${r.bottom}px`, right: `${window.innerWidth - r.right}px` });
     }
-  } }, [icon('download'), label, pop]);
+  } }, [icon(iconName), label || null, pop]);
 }

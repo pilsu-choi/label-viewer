@@ -25,16 +25,18 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
     apply();
   }
 
+  const PAGE_MARGIN = 24;
+
   function fitWidth() {
     if (!natW) return;
-    scale = stage.clientWidth / natW;
-    tx = 0; ty = 0;
+    scale = Math.max(0.02, (stage.clientWidth - PAGE_MARGIN * 2) / natW);
+    tx = PAGE_MARGIN; ty = PAGE_MARGIN;
     apply();
   }
 
   function fitPage() {
     if (!natW) return;
-    scale = Math.min(stage.clientWidth / natW, stage.clientHeight / natH);
+    scale = Math.max(0.02, Math.min((stage.clientWidth - PAGE_MARGIN * 2) / natW, (stage.clientHeight - PAGE_MARGIN * 2) / natH));
     tx = (stage.clientWidth - natW * scale) / 2;
     ty = (stage.clientHeight - natH * scale) / 2;
     apply();

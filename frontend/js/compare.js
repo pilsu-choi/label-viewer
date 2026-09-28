@@ -71,9 +71,10 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
     clear(host);
     const list = doc.compare || [];
     const c = counts(list);
-    const toolbar = el('div', { class: 'cmp-toolbar' }, [
-      ...[['all', '전체', list.length], ['mismatch', '불일치', c.mismatch], ['missing', '누락', c.missing], ['extra', '추가', c.extra]]
-        .map(([key, label, n]) => el('button', { class: `chip ${state.filter === key ? 'active' : ''}`, onclick: () => { state.filter = key; draw(); } }, [label, el('span', { class: 'n' }, String(n))])),
+    const toolbar = el('div', { class: 'cmp-toolbar seg' }, [
+      ...[['all', '전체', list.length, false], ['mismatch', '불일치', c.mismatch, true], ['missing', '누락', c.missing, true], ['extra', '추가', c.extra, true]]
+        .map(([key, label, n, warnTone]) => el('button', { class: state.filter === key ? 'active' : '', onclick: () => { state.filter = key; draw(); } },
+          [label, el('span', { class: `seg-count ${n && warnTone ? 'bad' : ''}` }, String(n))])),
     ]);
     const scoreCards = el('div', { class: 'cmp-score-cards' }, [scoreCard('AO Extract', doc.score && doc.score.ao), scoreCard('Harness', doc.score && doc.score.harness)]);
 

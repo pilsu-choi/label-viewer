@@ -3,9 +3,9 @@ import { api } from './api.js';
 import { navigate } from './router.js';
 
 function docBadges(has) {
-  const order = [['original', '원본'], ['preprocessed', '전처리'], ['ao_extract', 'AO'], ['harness', 'Harness'], ['golden', 'Golden']];
-  return el('div', { class: 'doc-badges' }, order.map(([k, label]) =>
-    el('span', { class: `mini-badge ${has[k] ? 'on' : 'off'}`, title: `${label} ${has[k] ? '있음' : '없음'}` }, label)));
+  const order = [['original', '원본', '원'], ['preprocessed', '전처리', '전'], ['ao_extract', 'AO 결과', 'AO'], ['harness', 'Harness 결과', 'H'], ['golden', 'Golden', 'G']];
+  return el('div', { class: 'doc-badges' }, order.map(([k, full, short]) =>
+    el('span', { class: `file-chip ${has[k] ? 'on' : 'off'}`, title: `${full} ${has[k] ? '있음' : '없음'}` }, short)));
 }
 
 function accBars(score) {
@@ -19,9 +19,9 @@ function accBars(score) {
 }
 
 function reviewBadge(review) {
-  if (review === 'done') return el('span', { class: 'doc-review done' }, [icon('check'), '검수 완료']);
-  if (review === 'progress') return el('span', { class: 'doc-review' }, '검수 중');
-  return null;
+  if (review === 'done') return el('span', { class: 'badge badge-ok' }, [icon('check'), '완료']);
+  if (review === 'progress') return el('span', { class: 'badge badge-warn' }, '검수중');
+  return el('span', { class: 'badge badge-muted' }, '미검수');
 }
 
 function thumbImg(bundleId, doc) {
@@ -85,7 +85,7 @@ export function renderList(root, bundleId) {
     return el('div', { class: 'filter-row' }, [
       ...defs.map(([key, label, n]) => el('button', { class: `chip ${state.filter === key ? 'active' : ''}`,
         onclick: () => { state.filter = key; draw(); } }, [label, el('span', { class: 'n' }, String(n))])),
-      el('div', { class: 'view-toggle' }, [
+      el('div', { class: 'seg view-seg' }, [
         el('button', { class: state.view === 'grid' ? 'active' : '', onclick: () => { state.view = 'grid'; draw(); }, title: '썸네일', 'aria-label': '썸네일 보기' }, icon('grid')),
         el('button', { class: state.view === 'list' ? 'active' : '', onclick: () => { state.view = 'list'; draw(); }, title: '목록', 'aria-label': '목록 보기' }, icon('list')),
       ]),
@@ -141,17 +141,23 @@ export function renderList(root, bundleId) {
 
     function drawGrid() {
       const docs = filteredDocs();
-      if (!docs.length) { mount(gridHost, el('div', { class: 'empty-state' }, '조건에 맞는 문서가 없습니다. 필터나 검색어를 바꿔 보세요.')); return; }
+      if (!docs.length) {
+        mount(gridHost, el('div', { class: 'empty' }, [
+          icon('search'),
+          el('div', { class: 'empty-title' }, '조건에 맞는 문서가 없습니다'),
+          el('div', { class: 'empty-desc' }, '필터나 검색어를 바꿔 보세요.'),
+        ]));
+        return;
+      }
       if (state.view === 'grid') {
         mount(gridHost, el('div', { class: 'doc-grid' }, docs.map((d) => {
           const card = el('div', { class: 'doc-card', onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(d.id)}`) }, [
             thumbImg(bundleId, d),
-            reviewBadge(d.review),
             el('div', { class: 'doc-info' }, [
-              el('div', { class: 'doc-id' }, d.id),
+              el('div', { class: 'doc-info-head' }, [el('span', { class: 'doc-id' }, d.id), reviewBadge(d.review)]),
               el('div', { class: 'doc-type' }, d.doc_type || '문서 유형 없음'),
               docBadges(d.has),
-              d.errors && d.errors.length ? el('div', { class: 'doc-err', title: d.errors.join('\n') }, `읽지 못한 파일 ${d.errors.length}개`) : null,
+              d.errors && d.errors.length ? el('span', { class: 'badge badge-bad', title: d.errors.join('\n') }, `오류 ${d.errors.length}`) : null,
               accBars(d.score),
             ]),
           ]);
@@ -162,7 +168,7 @@ export function renderList(root, bundleId) {
           el('span', { class: 'doc-id' }, d.id),
           docBadges(d.has),
           el('span', { class: 'doc-type' }, d.doc_type || '—'),
-          reviewBadge(d.review) || el('span'),
+          reviewBadge(d.review),
         ]))));
       }
     }
