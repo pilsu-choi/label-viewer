@@ -208,6 +208,10 @@ const ICONS = {
   'chevrons-up-down': [['path', { d: 'M7 15l5 5 5-5' }], ['path', { d: 'M7 9l5-5 5 5' }]],
   'chevrons-down-up': [['path', { d: 'M7 20l5-5 5 5' }], ['path', { d: 'M7 4l5 5 5-5' }]],
   copy: [['rect', { x: 9, y: 9, width: 13, height: 13, rx: 2 }], ['path', { d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' }]],
+  'panel-left-close': [['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ['path', { d: 'M9 3v18' }], ['path', { d: 'M15 9l-3 3 3 3' }]],
+  'panel-left-open': [['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ['path', { d: 'M9 3v18' }], ['path', { d: 'M13 9l3 3-3 3' }]],
+  'panel-right-close': [['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ['path', { d: 'M15 3v18' }], ['path', { d: 'M9 9l3 3-3 3' }]],
+  'panel-right-open': [['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ['path', { d: 'M15 3v18' }], ['path', { d: 'M11 9l-3 3 3 3' }]],
 };
 export function icon(name) {
   const NS = 'http://www.w3.org/2000/svg';

@@ -15,21 +15,20 @@ function readFocusMode() {
 }
 function writeFocusMode(mode) { try { localStorage.setItem('lv.bboxMode', mode); } catch {} }
 
+function readFlag(key) { try { return localStorage.getItem(key) === '1'; } catch { return false; } }
+function writeFlag(key, val) { try { localStorage.setItem(key, val ? '1' : '0'); } catch {} }
 const RECON_HEIGHT_DEFAULT = 220;
-function readReconCollapsed() {
-  try { return localStorage.getItem('lv.reconCollapsed') === '1'; } catch { return false; }
-}
-function writeReconCollapsed(v) { try { localStorage.setItem('lv.reconCollapsed', v ? '1' : '0'); } catch {} }
 function readReconHeight() {
   try { const n = Number(localStorage.getItem('lv.reconHeight')); return n >= 90 ? n : RECON_HEIGHT_DEFAULT; } catch { return RECON_HEIGHT_DEFAULT; }
 }
 function writeReconHeight(h) { try { localStorage.setItem('lv.reconHeight', String(Math.round(h))); } catch {} }
 
 export function renderDetail(root, bundleId, docId) {
-  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), reconCollapsed: readReconCollapsed() };
+  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), railCollapsed: readFlag('lv.railCollapsed'), panelCollapsed: readFlag('lv.panelCollapsed'), reconCollapsed: readFlag('lv.reconCollapsed') };
   let doc = null, bundle = null, editor = null, compareApi = null, imgViewer = null, documentRail = null;
   let saveStateEl, reviewInput, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
   let leftPanel, rightPanel, closeExportMenus, dragCleanup;
+  let railHost, workspace, body, rightCollapseBtn;
   let destroyed = false;
 
   mount(root, el('div', { class: 'loading-block' }, '불러오는 중…'));
@@ -62,6 +61,8 @@ export function renderDetail(root, bundleId, docId) {
     else if (e.key === '1') { setReconSource('golden'); }
     else if (e.key === '2') { setReconSource('ao'); }
     else if (e.key === '3') { setReconSource('harness'); }
+    else if (e.key === '[') { toggleRail(); }
+    else if (e.key === ']') { togglePanel(); }
     else if (e.key === '?') { openHelp(); }
   }
 
@@ -88,10 +89,50 @@ export function renderDetail(root, bundleId, docId) {
     writeFocusMode(mode);
   }
 
+  function animateWidth(elm) {
+    if (!elm) return;
+    elm.classList.add('lv-anim-w');
+    window.setTimeout(() => elm.classList.remove('lv-anim-w'), 200);
+  }
+
+  function setRightCollapseBtn(collapsed) {
+    if (!rightCollapseBtn) return;
+    rightCollapseBtn.title = collapsed ? '검수 패널 펼치기' : '검수 패널 접기';
+    rightCollapseBtn.setAttribute('aria-label', rightCollapseBtn.title);
+    clear(rightCollapseBtn);
+    rightCollapseBtn.appendChild(icon(collapsed ? 'panel-right-open' : 'panel-right-close'));
+  }
+
+  function applyRailState(collapsed) {
+    workspace && workspace.classList.toggle('rail-collapsed', collapsed);
+    documentRail && documentRail.setCollapsed(collapsed);
+  }
+
+  function applyPanelState(collapsed) {
+    body && body.classList.toggle('panel-collapsed', collapsed);
+    setRightCollapseBtn(collapsed);
+  }
+
+  function toggleRail() {
+    state.railCollapsed = !state.railCollapsed;
+    writeFlag('lv.railCollapsed', state.railCollapsed);
+    animateWidth(railHost);
+    applyRailState(state.railCollapsed);
+  }
+
+  function togglePanel() {
+    state.panelCollapsed = !state.panelCollapsed;
+    writeFlag('lv.panelCollapsed', state.panelCollapsed);
+    animateWidth(rightPanel);
+    animateWidth(leftPanel);
+    applyPanelState(state.panelCollapsed);
+  }
+
   function openHelp() {
     if (helpOverlay) return;
     const rows = [['← / →', '이전 / 다음 문서'], ['Ctrl+S', '저장'], ['+', '필드 추가'], ['Delete', '필드 삭제'],
-      ['M', '다음 불일치'], ['O', '원본/전처리 전환'], ['Z', 'bbox hover 확대/위치표시 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'], ['?', '도움말']];
+      ['M', '다음 불일치'], ['O', '원본/전처리 전환'], ['Z', 'bbox hover 확대/위치표시 전환'], ['1 / 2 / 3', 'Golden / AO / Harness 재구성'],
+      ['[', '문서 목록 접기/펼치기'], [']', '검수 패널 접기/펼치기'], ['?', '도움말']];
     helpOverlay = el('div', { class: 'help-overlay', onclick: (e) => { if (e.target === helpOverlay) closeHelp(); } },
       el('div', { class: 'help-card' }, [
         el('h3', {}, '단축키'),
@@ -236,8 +277,8 @@ export function renderDetail(root, bundleId, docId) {
         el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomOut(), title: '축소' }, icon('zoom-out')),
         el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomIn(), title: '확대' }, icon('zoom-in')),
         zoomLabel,
-        el('button', { class: 'btn ghost sm', onclick: () => imgViewer.fitWidth() }, '너비 맞춤'),
-        el('button', { class: 'btn ghost sm', onclick: () => imgViewer.fitPage() }, [icon('maximize'), '전체 보기']),
+        el('button', { class: 'btn ghost sm', onclick: () => imgViewer.fitWidth(), title: '너비 맞춤' }, [icon('columns'), el('span', { class: 'lbl' }, '너비 맞춤')]),
+        el('button', { class: 'btn ghost sm', onclick: () => imgViewer.fitPage(), title: '전체 보기' }, [icon('maximize'), el('span', { class: 'lbl' }, '전체 보기')]),
       ]),
     ]);
     leftPanel = el('div', { class: 'detail-left' }, [viewerToolbar, stage]);
@@ -250,7 +291,9 @@ export function renderDetail(root, bundleId, docId) {
     tabButtons.edit.addEventListener('click', () => setTab('edit'));
     tabButtons.compare.addEventListener('click', () => setTab('compare'));
     tabButtons.raw.addEventListener('click', () => setTab('raw'));
-    const tabs = el('div', { class: 'tabs panel-head' }, [tabButtons.edit, tabButtons.compare, tabButtons.raw]);
+    rightCollapseBtn = el('button', { class: 'btn ghost icon', onclick: () => togglePanel() }, icon('panel-right-close'));
+    setRightCollapseBtn(state.panelCollapsed);
+    const tabs = el('div', { class: 'tabs panel-head' }, [tabButtons.edit, tabButtons.compare, tabButtons.raw, el('div', { class: 'grow' }), rightCollapseBtn]);
 
     tabHosts.edit = el('div', { class: 'tab-panel-host' });
     tabHosts.compare = el('div', { class: 'tab-panel-host', style: 'display:none' });
@@ -297,7 +340,7 @@ export function renderDetail(root, bundleId, docId) {
     ]);
     function toggleReconCollapse() {
       state.reconCollapsed = !state.reconCollapsed;
-      writeReconCollapsed(state.reconCollapsed);
+      writeFlag('lv.reconCollapsed', state.reconCollapsed);
       reconPanel.classList.toggle('collapsed', state.reconCollapsed);
       reconPanel.style.height = state.reconCollapsed ? '' : `${readReconHeight()}px`;
       vsplit.style.display = state.reconCollapsed ? 'none' : '';
@@ -308,11 +351,11 @@ export function renderDetail(root, bundleId, docId) {
     let dragging = false, startY = 0, startH = 0;
     const onVMove = (e) => { if (!dragging) return; const h = Math.min(Math.max(90, startH - (e.clientY - startY)), rightPanel.clientHeight - 120); reconPanel.style.height = `${h}px`; };
     const onVUp = () => { if (dragging) writeReconHeight(reconPanel.getBoundingClientRect().height); dragging = false; vsplit.classList.remove('active'); };
-    vsplit.addEventListener('mousedown', (e) => { dragging = true; startY = e.clientY; startH = reconPanel.getBoundingClientRect().height; vsplit.classList.add('active'); });
+    vsplit.addEventListener('mousedown', (e) => { e.preventDefault(); dragging = true; startY = e.clientY; startH = reconPanel.getBoundingClientRect().height; vsplit.classList.add('active'); });
     window.addEventListener('mousemove', onVMove);
     window.addEventListener('mouseup', onVUp);
 
-    rightPanel = el('div', { class: 'detail-right' }, [tabs, tabHosts.edit, tabHosts.compare, tabHosts.raw, vsplit, reconPanel]);
+    rightPanel = el('div', { class: 'detail-right' }, [tabs, tabHosts.edit, tabHosts.compare, tabHosts.raw, vsplit, reconPanel, el('div', { class: 'panel-vlabel' }, '검수')]);
 
     const resizer = el('div', { class: 'splitter h detail-resizer' });
     let rdrag = false, rStartX = 0, rStartW = 0;
@@ -323,7 +366,7 @@ export function renderDetail(root, bundleId, docId) {
       leftPanel.style.width = `${w}px`;
     };
     const onRUp = () => { rdrag = false; resizer.classList.remove('active'); };
-    resizer.addEventListener('mousedown', (e) => { rdrag = true; rStartX = e.clientX; rStartW = leftPanel.getBoundingClientRect().width; resizer.classList.add('active'); });
+    resizer.addEventListener('mousedown', (e) => { e.preventDefault(); rdrag = true; rStartX = e.clientX; rStartW = leftPanel.getBoundingClientRect().width; resizer.classList.add('active'); });
     window.addEventListener('mousemove', onRMove);
     window.addEventListener('mouseup', onRUp);
     dragCleanup = () => {
@@ -331,8 +374,8 @@ export function renderDetail(root, bundleId, docId) {
       window.removeEventListener('mousemove', onRMove); window.removeEventListener('mouseup', onRUp);
     };
 
-    const body = el('div', { class: 'detail-body' }, [leftPanel, resizer, rightPanel]);
-    const railHost = el('aside', { class: 'doc-rail', 'aria-label': '문서 목록' });
+    body = el('div', { class: 'detail-body' }, [leftPanel, resizer, rightPanel]);
+    railHost = el('aside', { class: 'doc-rail', 'aria-label': '문서 목록' });
     const railResizer = el('div', { class: 'splitter h doc-rail-resizer', role: 'separator', 'aria-label': '문서 목록 너비 조절' });
     let railDragging = false;
     const onRailMove = (e) => { if (railDragging) railHost.style.width = `${Math.max(180, Math.min(360, e.clientX - railHost.getBoundingClientRect().left))}px`; };
@@ -343,8 +386,9 @@ export function renderDetail(root, bundleId, docId) {
     const cleanupPanelDrags = dragCleanup;
     dragCleanup = () => { cleanupPanelDrags(); window.removeEventListener('mousemove', onRailMove); window.removeEventListener('mouseup', onRailUp); };
     documentRail = createDocumentRail(railHost, bundle?.docs || [], docId,
-      (nextId) => nextId !== docId && navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(nextId)}`));
-    const workspace = el('div', { class: 'detail-main' }, [railHost, railResizer, body]);
+      (nextId) => nextId !== docId && navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(nextId)}`),
+      { onToggleCollapse: toggleRail });
+    workspace = el('div', { class: 'detail-main' }, [railHost, railResizer, body]);
 
     const screen = el('div', { class: 'detail-screen' }, [
       topbar,
@@ -355,6 +399,9 @@ export function renderDetail(root, bundleId, docId) {
       workspace,
     ]);
     mount(root, screen);
+
+    applyRailState(state.railCollapsed);
+    applyPanelState(state.panelCollapsed);
 
     loadImage();
     drawRecon();

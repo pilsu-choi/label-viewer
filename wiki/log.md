@@ -11,6 +11,17 @@ status: active
 브랜치: `fix/ao-upload-raw`
 워크트리: `.worktrees/ao-upload-fix`
 
+## 2026-09-29
+
+### Creation
+
+- [Label Viewer 상세 화면 레이아웃·그리드·스크롤 개선](2026-09-29-label-viewer-layout-grid.md): 패널 접기, 이미지 동적 재조정, 편집·재구성 그리드, 비교 근거 스크롤, 추가 시 스크롤 유지 기록.
+
+### Update
+
+- [README](../README.md): `[`·`]` 패널 접기 단축키와 이미지 동적 재조정 안내 추가.
+- [wiki/index.md](index.md): 레이아웃·그리드 문서 링크 추가.
+
 ## 2026-09-28
 
 ### Creation
