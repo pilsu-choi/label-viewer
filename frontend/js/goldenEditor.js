@@ -166,7 +166,7 @@ export function createGoldenEditor(host, opts) {
     const d0 = ensureDoc0();
     host.appendChild(el('div', { class: 'doctype-row' }, [
       el('label', {}, '문서 유형'),
-      el('input', { type: 'text', value: d0.doc_type || '', oninput: (e) => { d0.doc_type = e.target.value; markDirty(); } }),
+      docTypeSelect(d0.doc_type || '', '미지정', (v) => { d0.doc_type = v; markDirty(); }),
     ]));
     host.appendChild(renderFieldsSection(d0));
     host.appendChild(renderGroupsSection(d0));
@@ -218,6 +218,13 @@ export function createGoldenEditor(host, opts) {
     if (opts.onHoverBbox) opts.onHoverBbox(entry && entry.bbox ? entry.bbox : null);
   }
 
+  // 표준 문서 종류 select. 표준에 없는 현재 값은 추가 옵션으로 유지한다.
+  function docTypeSelect(value, blankLabel, onchange) {
+    const types = value && !doc.doc_types.includes(value) ? [...doc.doc_types, value] : doc.doc_types;
+    return el('select', { onchange: (e) => onchange(e.target.value) },
+      [['', blankLabel], ...types.map((t) => [t, t])].map(([v, l]) => el('option', { value: v, selected: v === value }, l)));
+  }
+
   function renderCreateCard() {
     const sources = [
       ['ao', 'AO 결과에서', doc.has.ao_extract],
@@ -225,6 +232,7 @@ export function createGoldenEditor(host, opts) {
       ['empty', '빈 Golden', true],
     ];
     let chosen = sources.find((s) => s[2])[0];
+    let docType = doc.doc_type_suggest;
     const card = el('div', { class: 'gs-create-card' }, [
       el('h3', {}, 'Golden Set이 없습니다'),
       el('p', {}, '아래 소스로 초안을 만든 뒤 검수를 시작하세요.'),
@@ -241,10 +249,15 @@ export function createGoldenEditor(host, opts) {
       optsHost.appendChild(row);
     });
     card.appendChild(optsHost);
+    card.appendChild(el('div', { class: 'doctype-row' }, [
+      el('label', {}, '문서 종류'),
+      docTypeSelect(docType, '선택 안 함', (v) => { docType = v; }),
+    ]));
+    card.appendChild(el('div', { class: 'hint' }, 'AO 분류와 다르면 해당 양식 템플릿으로 뼈대를 바꾸고 같은 key 값은 유지합니다.'));
     const m = doc.doc_type_mismatch;
     card.appendChild(el('button', { class: 'btn primary', onclick: () => {
-      if (m && chosen === 'ao' && !confirm(`AO가 '${m.ao}' 양식으로 추출해 키가 실제 문서('${m.title}')와 다릅니다. Harness로 생성하길 권장합니다. 그래도 AO로 만들까요?`)) return;
-      api.createGolden(bundleId, docId, chosen).then((res) => {
+      if (m && chosen === 'ao' && !docType && !confirm(`AO가 '${m.ao}' 양식으로 추출해 키가 실제 문서('${m.title}')와 다릅니다. Harness로 생성하길 권장합니다. 그래도 AO로 만들까요?`)) return;
+      api.createGolden(bundleId, docId, chosen, docType).then((res) => {
         doc = res; golden = null; cmap = compareMap(doc.compare);
         render(); toast('Golden Set을 생성했습니다.');
         opts.onGoldenCreated && opts.onGoldenCreated(res);

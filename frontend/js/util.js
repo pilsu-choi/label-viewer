@@ -260,6 +260,12 @@ export function menuButton(label, items, iconName = 'download', extraClass = '')
   } }, [icon(iconName), label || null, pop]);
 }
 
+// 분류 오답 배지(AO/Harness). 오답이 없으면 null.
+export function classBadges(c) {
+  const bad = [['ao', 'AO 분류 오답'], ['harness', 'H 분류 오답']].filter(([k]) => c && c[k] === false);
+  return bad.length ? bad.map(([, label]) => el('span', { class: 'badge badge-bad', title: 'Golden 문서 종류와 다르게 분류됨' }, label)) : null;
+}
+
 export function mismatchBadge(m) {
   return m ? el('span', { class: 'badge badge-warn', title: `AO: ${m.ao} → 제목: ${m.title}${m.title_line ? ` (${m.title_line})` : ''}` }, '양식 불일치') : null;
 }

@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.app import create_app
 from backend.bundle import classify, stem_of
+from backend.doctype import DOC_TYPES, TEMPLATES, apply_template, canon
 from scripts import make_dummy_bundle as dummy
 
 
@@ -370,3 +371,76 @@ def test_doc_type_mismatch(client: TestClient):
     assert listed == {"RE1": expected, "KEPT": None, "SAME": None}
     assert client.get(f"/api/bundles/{bid}/docs/RE1").json()["doc_type_mismatch"] == expected
     assert client.get(f"/api/bundles/{bid}/docs/KEPT").json()["doc_type_mismatch"] is None
+
+
+# ── 문서 종류 · 분류 채점 ─────────────────────────────────────────────────
+
+def _typed(doc_type: str, value: str = "v") -> bytes:
+    doc = {"doc_type": doc_type, "extracted_groups": [], "extracted_tables": [],
+           "extracted_fields": [{"key": "발행일", "value": value, "dtype": "string"}]}
+    return json.dumps({"documents": [doc]}).encode()
+
+
+def _typed_bundle(client: TestClient) -> str:
+    spec = {"OK": ("진료비영수증", "AC02922011", "진료비영수증"),   # 분류 정답
+            "BAD": ("세부내역서", "AC02922011", "진료비세부산정내역서"),  # AO 오답, H 정답(별칭)
+            "NOGOLD": (None, "AC02922011", "")}
+    files = []
+    for i, (g, a, h) in spec.items():
+        for kind, t, sfx in (("golden", g, "answer"), ("ao_extract", a, "aiocr"), ("harness", h, "harness")):
+            if t:
+                files.append(("files", (f"{kind}/{i}.{sfx}.json", _typed(t, "x" if kind == "ao_extract" else "v"), "application/json")))
+    return client.post("/api/bundles", files=files, data={"name": "cls"}).json()["id"]
+
+
+def test_canon_and_apply_template():
+    assert canon("Y000701333") == "소견서" and canon(" 입원확인서 ") == "입퇴원확인서"
+    assert canon("모름") == canon("") == canon(None) == ""
+    doc = {"extracted_fields": [{"key": "발행일", "value": "2024"}], "extracted_groups": [
+        {"key": "환자정보", "fields": [{"key": "환자정보-성명", "value": "홍"}]}], "extracted_tables": [
+        {"key": "항목내역", "headers": ["a"], "rows": [[{"key": "항목", "value": "주사"}, {"key": "zzz", "value": "1"}]]}]}
+    out = apply_template(doc, "약제영수증")
+    assert out["doc_type"] == "약제비영수증" and out is not TEMPLATES["약제비영수증"]
+    out = apply_template(doc, "진료비영수증")
+    cells = {c["key"]: c["value"] for c in out["extracted_fields"] + [f for g in out["extracted_groups"] for f in g["fields"]]}
+    assert cells["발행일"] == "2024" and cells["환자정보-성명"] == "홍"
+    rows = out["extracted_tables"][0]["rows"]
+    assert [c["key"] for c in rows[0]] == ["항목"]
+
+
+def test_create_golden_with_doc_type(client: TestClient):
+    bid = _typed_bundle(client)
+    r = client.post(f"/api/bundles/{bid}/docs/NOGOLD/golden", json={"from": "ao", "doc_type": "세부내역서"}).json()
+    d0 = r["golden"]["documents"][0]
+    assert d0["doc_type"] == "세부내역서"
+    assert [c["key"] for c in d0["extracted_fields"]] == [c["key"] for c in TEMPLATES["세부내역서"]["extracted_fields"]]
+    assert r["doc_type_suggest"] == "진료비영수증"
+    assert r["doc_types"] == DOC_TYPES
+
+
+def test_create_golden_same_type_keeps_ao(client: TestClient):
+    bid = _typed_bundle(client)
+    d0 = client.post(f"/api/bundles/{bid}/docs/NOGOLD/golden", json={"from": "ao", "doc_type": "진료비영수증"}).json()["golden"]["documents"][0]
+    assert d0["doc_type"] == "진료비영수증" and d0["extracted_fields"][0]["value"] == "x"
+    empty = client.post(f"/api/bundles/{bid}/docs/OK/golden", json={"from": "empty", "doc_type": "진단서"})
+    assert empty.status_code == 409  # 이미 golden 있음
+
+
+def test_classification_grading(client: TestClient):
+    bid = _typed_bundle(client)
+    docs = {d["id"]: d for d in client.get(f"/api/bundles/{bid}").json()["docs"]}
+    assert docs["OK"]["classification"] == {"ao": True, "harness": True}
+    assert docs["BAD"]["classification"] == {"ao": False, "harness": True}
+    assert docs["NOGOLD"]["classification"] == {"ao": None, "harness": None}
+    assert client.get(f"/api/bundles/{bid}/docs/BAD").json()["classification"] == {"ao": False, "harness": True}
+    summ = client.get(f"/api/bundles/{bid}").json()["summary"]
+    assert summ["classification"]["ao"] == {"correct": 1, "total": 2, "accuracy": 0.5}
+    assert summ["classification"]["harness"]["accuracy"] == 1.0
+    # AO: BAD 는 필드 집계에서 제외 (OK 의 MISMATCH 1건만), H: 두 문서 모두 포함
+    assert summ["score"]["ao"]["total"] == 1
+    assert summ["score"]["harness"]["total"] == 2
+    ws = load_workbook(io.BytesIO(client.get(f"/api/bundles/{bid}/export/golden.xlsx").content))["요약"]
+    rows = {r[0]: r for r in ws.iter_rows(min_row=2, values_only=True)}
+    assert rows["BAD"][2:4] == ("X", "O") and rows["OK"][2:4] == ("O", "O")
+    assert rows["NOGOLD"][2:4] in (("", ""), (None, None))
+    assert rows["합계"][5] == 0 and rows["합계"][6] == 1  # AO: BAD 제외 → OK 의 MATCH 0 / MISMATCH 1

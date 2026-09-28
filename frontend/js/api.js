@@ -29,8 +29,8 @@ export const api = {
     `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/raw/${kind}`,
   getRaw: (bundleId, docId, kind) => fetch(`/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/raw/${kind}`)
     .then((res) => { if (!res.ok) throw new Error(`${res.status}`); return res.text(); }),
-  createGolden: (bundleId, docId, from) =>
-    req('POST', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`, { from }),
+  createGolden: (bundleId, docId, from, docType) =>
+    req('POST', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`, { from, doc_type: docType || undefined }),
   putGolden: (bundleId, docId, golden) =>
     req('PUT', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`, { golden }),
   deleteGolden: (bundleId, docId) =>
