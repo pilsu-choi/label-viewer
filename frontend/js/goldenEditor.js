@@ -236,11 +236,14 @@ export function createGoldenEditor(host, opts) {
           onchange: () => { chosen = key; } }),
         el('div', { class: 'grow' }, [el('div', { class: 'opt-label' }, label)]),
         enabled ? null : el('span', { class: 'badge badge-muted' }, '파일 없음'),
+        enabled && key === 'harness' && doc.doc_type_mismatch ? el('span', { class: 'badge badge-ok' }, '권장') : null,
       ]);
       optsHost.appendChild(row);
     });
     card.appendChild(optsHost);
+    const m = doc.doc_type_mismatch;
     card.appendChild(el('button', { class: 'btn primary', onclick: () => {
+      if (m && chosen === 'ao' && !confirm(`AO가 '${m.ao}' 양식으로 추출해 키가 실제 문서('${m.title}')와 다릅니다. Harness로 생성하길 권장합니다. 그래도 AO로 만들까요?`)) return;
       api.createGolden(bundleId, docId, chosen).then((res) => {
         doc = res; golden = null; cmap = compareMap(doc.compare);
         render(); toast('Golden Set을 생성했습니다.');

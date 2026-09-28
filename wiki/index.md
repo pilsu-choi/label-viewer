@@ -22,6 +22,7 @@ status: active
 - [2026-09-29 Label Viewer 비교 탭 사용성 개선](2026-09-29-compare-tab-usability.md)
 - [2026-09-29 Label Viewer 편집 탭 버그 수정·사용성 개선](2026-09-29-edit-tab-usability.md)
 - [2026-09-29 Label Viewer 상세 화면 레이아웃·그리드·스크롤 개선](2026-09-29-label-viewer-layout-grid.md)
+- [2026-09-29 Label Viewer 양식 불일치 표시와 문서 분류 판정 검토](2026-09-29-doc-type-mismatch.md)
 - [2026-09-28 Label Viewer UI 마감 품질 개선](2026-09-28-label-viewer-ui-polish.md)
 - [2026-09-28 AO–Harness Golden Set 검수 Viewer](2026-09-28-golden-set-viewer.md) (deprecated)
 - [작업 기록](log.md)

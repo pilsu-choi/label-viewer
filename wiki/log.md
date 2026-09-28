@@ -15,6 +15,7 @@ status: active
 
 ### Creation
 
+- [Label Viewer 양식 불일치 표시와 문서 분류 판정 검토](2026-09-29-doc-type-mismatch.md): Harness 재분류 기반 양식 불일치 배지, AO 기반 Golden 생성 경고, AO JSON만으로 분류 판정 가능성 검증(e2e 205건)과 후속 제안 기록.
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): docker-compose.yml과 deploy/aws 스크립트 추가 기록.
 - [Label Viewer 비교 탭 사용성 개선](2026-09-29-compare-tab-usability.md): 비교 탭 점검 결과와 채택 흐름·개수 기준·Golden 없음 수정, 기본 불일치 필터, 셀 채택, 두 탭 공용 상태 색, 근거 팝오버, 표 행 묶기, 소스 필터·검색, 키보드 조작 기록.
 - [Label Viewer 편집 탭 버그 수정·사용성 개선](2026-09-29-edit-tab-usability.md): 편집 탭 점검 결과, 버그 4건 수정, 필드 행·표 셀 상태 표시, 재구성 패널 접기, 불일치 개수 기준 통일과 편집 탭 안 이동 기록.

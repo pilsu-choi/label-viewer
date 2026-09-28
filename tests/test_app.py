@@ -354,3 +354,19 @@ def test_path_traversal_rejected(client: TestClient, bundle: dict):
     bid = bundle["id"]
     r = client.get(f"/api/bundles/{bid}/docs/..%2f..%2fetc/image")
     assert r.status_code in (400, 404, 422)
+
+
+def _harness_json(action: str, ao: str, title: str) -> bytes:
+    doc = {"action": action, "ao_doc_type": ao, "title_doc_type": title, "title_line": "제목", "reason": "r"}
+    return json.dumps({"documents": [], "harness": {"reclassification": {"documents": [doc]}}}).encode()
+
+
+def test_doc_type_mismatch(client: TestClient):
+    files = [("files", (f"harness/{i}.harness.json", _harness_json(a, "A", t), "application/json"))
+             for i, a, t in (("RE1", "reextracted", "B"), ("KEPT", "kept", "B"), ("SAME", "reextracted", "A"))]
+    bid = client.post("/api/bundles", files=files, data={"name": "mm"}).json()["id"]
+    expected = {"ao": "A", "title": "B", "title_line": "제목", "reason": "r"}
+    listed = {d["id"]: d["doc_type_mismatch"] for d in client.get(f"/api/bundles/{bid}").json()["docs"]}
+    assert listed == {"RE1": expected, "KEPT": None, "SAME": None}
+    assert client.get(f"/api/bundles/{bid}/docs/RE1").json()["doc_type_mismatch"] == expected
+    assert client.get(f"/api/bundles/{bid}/docs/KEPT").json()["doc_type_mismatch"] is None
