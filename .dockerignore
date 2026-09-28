@@ -1,0 +1,11 @@
+.git/
+.worktrees/
+__pycache__/
+*.pyc
+.cache/
+storage/
+samples/
+tests/
+wiki/
+*.md
+.pytest_cache/

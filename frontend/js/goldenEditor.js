@@ -1,0 +1,327 @@
+import { el, clear, debounce, toast, statusLabel } from './util.js';
+import { api } from './api.js';
+import { cellDisplay } from './reconstruct.js';
+
+const DTYPES = ['string', 'int', 'float', 'number', 'date', 'bool'];
+
+let tooltipEl = null;
+function showTip(x, y, entry) {
+  hideTip();
+  if (!entry) return;
+  tooltipEl = el('div', { class: 'tooltip-pop', style: `left:${x + 12}px;top:${y + 12}px` }, [
+    el('div', {}, [el('b', {}, 'AO'), entry.ao === '' || entry.ao == null ? '—' : String(entry.ao), entry.ao_status ? ` (${statusLabel(entry.ao_status)})` : '']),
+    el('div', {}, [el('b', {}, 'Harness'), entry.harness === '' || entry.harness == null ? '—' : String(entry.harness), entry.harness_status ? ` (${statusLabel(entry.harness_status)})` : '']),
+  ]);
+  document.body.appendChild(tooltipEl);
+}
+function hideTip() { if (tooltipEl) { tooltipEl.remove(); tooltipEl = null; } }
+
+function compareMap(compareList) {
+  const m = new Map();
+  for (const c of compareList || []) m.set(c.path, c);
+  return m;
+}
+
+function mismatchOf(entry) {
+  if (!entry) return false;
+  return (entry.ao_status && entry.ao_status !== 'MATCH') || (entry.harness_status && entry.harness_status !== 'MATCH');
+}
+
+function findOrPush(arr, key, make) {
+  let it = arr.find((x) => x.key === key);
+  if (!it) { it = make(); arr.push(it); }
+  return it;
+}
+
+// compare 엔트리(doc/area/container/row/key)를 이용해 golden 값을 채택한다. 없는 위치면 만든다.
+function applyAdopt(golden, entry, value) {
+  if (!golden.documents) golden.documents = [];
+  while (golden.documents.length <= entry.doc) golden.documents.push({ doc_type: '', extracted_fields: [], extracted_groups: [], extracted_tables: [] });
+  const d = golden.documents[entry.doc];
+  d.extracted_fields = d.extracted_fields || []; d.extracted_groups = d.extracted_groups || []; d.extracted_tables = d.extracted_tables || [];
+  const dtype = entry.dtype || 'string';
+  if (entry.area === 'field') {
+    const cell = findOrPush(d.extracted_fields, entry.key, () => ({ key: entry.key, value: '', dtype }));
+    cell.value = value;
+  } else if (entry.area === 'group') {
+    const g = findOrPush(d.extracted_groups, entry.container, () => ({ key: entry.container, fields: [] }));
+    g.fields = g.fields || [];
+    const cell = findOrPush(g.fields, entry.key, () => ({ key: entry.key, value: '', dtype }));
+    cell.value = value;
+  } else if (entry.area === 'table') {
+    const t = findOrPush(d.extracted_tables, entry.container, () => ({ key: entry.container, headers: [], rows: [] }));
+    t.headers = t.headers || []; t.rows = t.rows || [];
+    let colIdx = t.headers.indexOf(entry.key);
+    if (colIdx === -1) { t.headers.push(entry.key); colIdx = t.headers.length - 1; }
+    const rowIdx = /^\d+$/.test(String(entry.row)) ? Number(entry.row) : t.rows.length;
+    while (t.rows.length <= rowIdx) t.rows.push(t.headers.map((h) => ({ key: h, value: '', dtype: 'string' })));
+    const row = t.rows[rowIdx];
+    while (row.length < t.headers.length) row.push({ key: t.headers[row.length], value: '', dtype: 'string' });
+    if (!row[colIdx]) row[colIdx] = { key: entry.key, value: '', dtype };
+    row[colIdx].value = value;
+  }
+}
+
+export function createGoldenEditor(host, opts) {
+  const { bundleId, docId } = opts;
+  let doc = opts.doc; // GET docs/{doc} 응답
+  let golden = null;
+  let dirty = false;
+  let autosave = true;
+  let advanced = false;
+  let collapsedGroups = new Set();
+  let cmap = compareMap(doc.compare);
+  let saveTimer = null;
+  const listeners = { dirty: opts.onDirtyChange || (() => {}), start: opts.onSaveStart || (() => {}), ok: opts.onSaveOk || (() => {}), err: opts.onSaveErr || (() => {}) };
+
+  const debouncedSave = debounce(() => { if (autosave) doSave(); }, 1500);
+
+  function markDirty() { dirty = true; listeners.dirty(true); debouncedSave(); }
+
+  function doSave() {
+    if (!golden) return Promise.resolve();
+    listeners.start();
+    return api.putGolden(bundleId, docId, golden).then((res) => {
+      doc = res; cmap = compareMap(doc.compare);
+      dirty = false; listeners.dirty(false); listeners.ok(res);
+    }).catch((e) => { listeners.err(e); toast(`저장 실패: ${e.message}`, 'error'); });
+  }
+
+  function ensureDoc0() {
+    if (!golden.documents) golden.documents = [];
+    if (!golden.documents.length) golden.documents.push({ doc_type: '', extracted_fields: [], extracted_groups: [], extracted_tables: [] });
+    const d = golden.documents[0];
+    if (!d.extracted_fields) d.extracted_fields = [];
+    if (!d.extracted_groups) d.extracted_groups = [];
+    if (!d.extracted_tables) d.extracted_tables = [];
+    return d;
+  }
+
+  function render() {
+    clear(host);
+    if (!doc.golden) { host.appendChild(renderCreateCard()); return; }
+    if (golden == null) golden = JSON.parse(JSON.stringify(doc.golden));
+    const extraDocs = (golden.documents || []).length - 1;
+    host.appendChild(el('div', { class: 'section-block' }, [
+      el('div', { class: 'section-head' }, [
+        el('h4', {}, '자동 저장'),
+        el('div', { class: 'grow' }),
+        el('label', { class: 'autosave-row', style: 'padding:0' }, [
+          el('input', { type: 'checkbox', checked: autosave, onchange: (e) => { autosave = e.target.checked; if (autosave && dirty) debouncedSave(); } }),
+          '켜짐 (1.5초 · Ctrl+S)',
+        ]),
+        el('button', { class: `btn btn-sm ${advanced ? 'btn-primary' : ''}`, onclick: () => { advanced = !advanced; render(); } }, 'Raw JSON'),
+        el('button', { class: 'btn btn-sm btn-danger', onclick: onDeleteGolden }, 'Golden 삭제'),
+      ]),
+    ]));
+
+    if (advanced) { host.appendChild(renderAdvanced()); return; }
+
+    const d0 = ensureDoc0();
+    host.appendChild(el('div', { class: 'doctype-row' }, [
+      el('label', {}, '문서 유형'),
+      el('input', { type: 'text', value: d0.doc_type || '', oninput: (e) => { d0.doc_type = e.target.value; markDirty(); } }),
+    ]));
+    host.appendChild(renderFieldsSection(d0));
+    host.appendChild(renderGroupsSection(d0));
+    host.appendChild(renderTablesSection(d0));
+    if (extraDocs > 0) host.appendChild(el('div', { class: 'hint' }, `이 번들 항목에는 문서가 ${extraDocs}개 더 있습니다 (Raw JSON 모드에서 확인).`));
+  }
+
+  function renderCreateCard() {
+    const sources = [
+      ['ao', 'From AO Extract', doc.has.ao_extract],
+      ['harness', 'From Harness', doc.has.harness],
+      ['empty', 'Empty', true],
+    ];
+    let chosen = sources.find((s) => s[2])[0];
+    const card = el('div', { class: 'gs-create-card' }, [
+      el('h3', {}, 'Golden Set이 없습니다'),
+      el('p', {}, '아래 소스로 초안을 만든 뒤 검수를 시작하세요.'),
+    ]);
+    const optsHost = el('div', {});
+    sources.forEach(([key, label, enabled]) => {
+      const row = el('label', { class: `gs-source-opt ${enabled ? '' : 'disabled'}` }, [
+        el('input', { type: 'radio', name: 'gs-src', value: key, checked: key === chosen, disabled: !enabled,
+          onchange: () => { chosen = key; } }),
+        el('div', {}, [
+          el('div', { class: 'opt-label' }, label),
+          el('div', { class: 'opt-sub' }, enabled ? '' : '원본 없음'),
+        ]),
+      ]);
+      optsHost.appendChild(row);
+    });
+    card.appendChild(optsHost);
+    card.appendChild(el('button', { class: 'btn btn-primary', style: 'width:100%;margin-top:6px', onclick: () => {
+      api.createGolden(bundleId, docId, chosen).then((res) => {
+        doc = res; golden = null; cmap = compareMap(doc.compare);
+        render(); toast('Golden Set을 생성했습니다.');
+        opts.onGoldenCreated && opts.onGoldenCreated(res);
+      }).catch((e) => toast(`생성 실패: ${e.message}`, 'error'));
+    } }, 'Create Golden Set'));
+    return card;
+  }
+
+  function onDeleteGolden() {
+    if (!confirm('Golden Set을 삭제할까요?')) return;
+    api.deleteGolden(bundleId, docId).then(() => {
+      doc = { ...doc, golden: null }; golden = null; render();
+      toast('Golden Set을 삭제했습니다.');
+      opts.onGoldenCreated && opts.onGoldenCreated(doc);
+    }).catch((e) => toast(e.message, 'error'));
+  }
+
+  function tipHandlers(path) {
+    return {
+      onmouseenter: (e) => { const entry = cmap.get(path); showTip(e.clientX, e.clientY, entry); if (entry && entry.bbox && opts.onHoverBbox) opts.onHoverBbox(entry.bbox); },
+      onmousemove: (e) => { if (tooltipEl) { tooltipEl.style.left = `${e.clientX + 12}px`; tooltipEl.style.top = `${e.clientY + 12}px`; } },
+      onmouseleave: () => { hideTip(); if (opts.onHoverBbox) opts.onHoverBbox(null); },
+    };
+  }
+
+  function cellRow(cell, path, onDelete) {
+    if (!cell.dtype) cell.dtype = 'string';
+    const entry = cmap.get(path);
+    const row = el('div', { class: `field-row ${mismatchOf(entry) ? 'mismatch' : ''}`, tabindex: '0' }, [
+      el('input', { type: 'text', value: cell.key, 'aria-label': 'key', oninput: (e) => { cell.key = e.target.value; markDirty(); } }),
+      el('div', { class: 'cell-wrap', ...tipHandlers(path) },
+        el('input', { type: 'text', value: cell.value == null ? '' : cell.value, oninput: (e) => { cell.value = e.target.value; markDirty(); } })),
+      el('select', { onchange: (e) => { cell.dtype = e.target.value; markDirty(); } },
+        DTYPES.map((t) => el('option', { value: t, selected: t === cell.dtype }, t))),
+      el('button', { class: 'btn btn-ghost btn-icon btn-danger', title: '삭제', onclick: () => onDelete() }, '✕'),
+    ]);
+    return row;
+  }
+
+  function renderFieldsSection(d0) {
+    const body = el('div', { class: 'section-body' });
+    d0.extracted_fields.forEach((cell, idx) => {
+      body.appendChild(cellRow(cell, `documents[0].fields[${cell.key}]`, () => { d0.extracted_fields.splice(idx, 1); markDirty(); render(); }));
+    });
+    return el('div', { class: 'section-block' }, [
+      el('div', { class: 'section-head' }, [el('h4', {}, 'Fields'), el('div', { class: 'grow' }),
+        el('button', { class: 'btn btn-sm', onclick: () => { d0.extracted_fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); } }, '+ Add Field')]),
+      body,
+    ]);
+  }
+
+  function renderGroupsSection(d0) {
+    const body = el('div', { class: 'section-body' });
+    d0.extracted_groups.forEach((g, gi) => {
+      if (!g.fields) g.fields = [];
+      const collapsed = collapsedGroups.has(gi);
+      const fieldsHost = el('div', { class: `group-fields ${collapsed ? 'collapsed' : ''}` });
+      g.fields.forEach((cell, fi) => {
+        fieldsHost.appendChild(cellRow(cell, `documents[0].groups[${g.key}].fields[${cell.key}]`, () => { g.fields.splice(fi, 1); markDirty(); render(); }));
+      });
+      fieldsHost.appendChild(el('button', { class: 'btn btn-sm btn-ghost', onclick: () => { g.fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); } }, '+ Add Field'));
+      body.appendChild(el('div', { class: 'group-block' }, [
+        el('div', { class: 'group-head' }, [
+          el('span', { class: 'chev', onclick: () => { collapsed ? collapsedGroups.delete(gi) : collapsedGroups.add(gi); render(); } }, collapsed ? '▶' : '▼'),
+          el('input', { type: 'text', value: g.key, oninput: (e) => { g.key = e.target.value; markDirty(); } }),
+          el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { d0.extracted_groups.splice(gi, 1); markDirty(); render(); } }, '✕'),
+        ]),
+        fieldsHost,
+      ]));
+    });
+    return el('div', { class: 'section-block' }, [
+      el('div', { class: 'section-head' }, [el('h4', {}, 'Groups'), el('div', { class: 'grow' }),
+        el('button', { class: 'btn btn-sm', onclick: () => { d0.extracted_groups.push({ key: '새 그룹', fields: [] }); markDirty(); render(); } }, '+ Add Group')]),
+      body,
+    ]);
+  }
+
+  function renderTablesSection(d0) {
+    const body = el('div', { class: 'section-body' });
+    d0.extracted_tables.forEach((t, ti) => {
+      if (!t.headers) t.headers = [];
+      if (!t.rows) t.rows = [];
+      const headRow = el('tr', { class: 'rowhandle-row' }, [
+        el('th', { class: 'rowhandle' }, '#'),
+        ...t.headers.map((h, ci) => el('th', {}, el('input', { type: 'text', value: h, oninput: (e) => {
+          t.headers[ci] = e.target.value;
+          t.rows.forEach((row) => { if (row[ci]) row[ci].key = e.target.value; });
+          markDirty();
+        } }))),
+        el('th', {}),
+      ]);
+      const tbody = el('tbody', {}, t.rows.map((row, ri) => el('tr', {}, [
+        el('td', { class: 'rowhandle' }, String(ri)),
+        ...t.headers.map((h, ci) => {
+          const cell = row[ci] || (row[ci] = { key: h, value: '', dtype: 'string' });
+          const path = `documents[0].tables[${t.key}].rows[${ri}].cells[${cell.key}]`;
+          return el('td', tipHandlers(path), el('input', { type: 'text', value: cell.value == null ? '' : cell.value,
+            oninput: (e) => { cell.value = e.target.value; markDirty(); } }));
+        }),
+        el('td', {}, el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { t.rows.splice(ri, 1); markDirty(); render(); } }, '✕')),
+      ])));
+      body.appendChild(el('div', { class: 'table-block' }, [
+        el('div', { class: 'table-head-row' }, [
+          el('input', { type: 'text', value: t.key, oninput: (e) => { t.key = e.target.value; markDirty(); } }),
+          el('button', { class: 'btn btn-ghost btn-icon btn-danger', onclick: () => { d0.extracted_tables.splice(ti, 1); markDirty(); render(); } }, '✕'),
+        ]),
+        el('div', { class: 'gs-table-wrap' }, el('table', { class: 'gs-table' }, [el('thead', {}, headRow), tbody])),
+        el('div', { class: 'gs-table-actions' }, [
+          el('button', { class: 'btn btn-sm', onclick: () => { t.rows.push(t.headers.map((h) => ({ key: h, value: '', dtype: 'string' }))); markDirty(); render(); } }, '+ 행'),
+          el('button', { class: 'btn btn-sm', onclick: () => {
+            t.headers.push('새 열');
+            t.rows.forEach((row) => row.push({ key: t.headers[t.headers.length - 1], value: '', dtype: 'string' }));
+            markDirty(); render();
+          } }, '+ 열'),
+        ]),
+      ]));
+    });
+    return el('div', { class: 'section-block' }, [
+      el('div', { class: 'section-head' }, [el('h4', {}, 'Tables'), el('div', { class: 'grow' }),
+        el('button', { class: 'btn btn-sm', onclick: () => { d0.extracted_tables.push({ key: '새 표', headers: ['열1'], rows: [] }); markDirty(); render(); } }, '+ Add Table')]),
+      body,
+    ]);
+  }
+
+  function renderAdvanced() {
+    let text = JSON.stringify(golden, null, 2);
+    const errBox = el('div', { class: 'json-error' });
+    const ta = el('textarea', { value: text });
+    return el('div', { class: 'advanced-json' }, [
+      ta,
+      errBox,
+      el('div', { style: 'display:flex;gap:8px;margin-top:8px' }, [
+        el('button', { class: 'btn btn-primary btn-sm', onclick: () => {
+          try {
+            const parsed = JSON.parse(ta.value);
+            if (!parsed || !Array.isArray(parsed.documents)) throw new Error('documents 배열이 필요합니다.');
+            golden = parsed; markDirty(); toast('적용했습니다. 저장하려면 Save를 누르세요.');
+            clear(errBox);
+          } catch (e) { clear(errBox); errBox.appendChild(document.createTextNode('JSON 오류: ' + e.message)); }
+        } }, '적용'),
+        el('button', { class: 'btn btn-sm', onclick: () => { advanced = false; render(); } }, '폼으로 돌아가기'),
+      ]),
+    ]);
+  }
+
+  render();
+
+  return {
+    isDirty: () => dirty,
+    isAutosaveOn: () => autosave,
+    save: () => { debouncedSave.cancel(); return doSave(); },
+    addField: () => { if (!doc.golden) return; const d0 = ensureDoc0(); d0.extracted_fields.push({ key: '새 필드', value: '', dtype: 'string' }); markDirty(); render(); },
+    deleteFocused: () => {
+      const active = host.querySelector('.field-row:focus-within, .field-row:hover');
+      if (active) { const del = active.querySelector('.btn-danger'); if (del) del.click(); }
+    },
+    getGoldenObject: () => golden,
+    setDoc: (newDoc) => { doc = newDoc; if (!dirty) golden = doc.golden ? JSON.parse(JSON.stringify(doc.golden)) : null; cmap = compareMap(doc.compare); render(); },
+    hasGolden: () => !!doc.golden,
+    adoptValue: (entry, value) => {
+      if (!doc.golden) { toast('먼저 Golden Set을 생성하세요.', 'error'); return; }
+      if (golden == null) golden = JSON.parse(JSON.stringify(doc.golden));
+      applyAdopt(golden, entry, value);
+      markDirty();
+      if (!advanced) render();
+    },
+    destroy: () => { debouncedSave.cancel(); hideTip(); },
+  };
+}
+
+export { cellDisplay };

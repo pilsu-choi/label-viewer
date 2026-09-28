@@ -1,95 +1,165 @@
 # API 계약
 
-서버: `python3 app.py [--e2e ../e2e] [--port 8765]` (FastAPI + uvicorn). `/`는 `static/index.html`을 서빙한다.
+서버: `python3 -m backend.app --data ./storage --port 8765` (FastAPI + uvicorn). `/` 는 `frontend/index.html`, `/static/*` 는 `frontend/` 를 서빙한다.
+DB 는 쓰지 않는다. 모든 상태는 `DATA_DIR`(기본 `./storage`, 환경변수 `LABEL_VIEWER_DATA`) 아래 파일이다.
 
-데이터 루트는 `E2E = e2e/`이고 문서 집합은 `E2E/표본결과`(7종 205건)이다. 문서는 `(folder, file)`로 식별한다. `folder`는 `진단서`·`진료비세부산정내역서` 같은 표본결과 하위 폴더이고, `file`은 확장자를 포함한 원본 이미지 파일명이다.
+## 저장 구조
 
-| 데이터 | 경로 |
-|---|---|
-| 원본 이미지 | `표본결과/{folder}/{file}` (tif/png/jpg, 여러 페이지 TIFF 가능) |
-| 정답지 원본(편집 대상) | `표본결과/_draft/{folder}/{file}.draft.json` |
-| 정답지 빌드본 | `표본결과/{folder}/{file}.answer.json` (`build_answers.convert(draft)`) |
-| AO 응답 | `표본결과/{folder}/{file}.aiocr.json` |
-| AO UI 응답(bbox) | `out/ao-ui-205-*/{folder}/{file}.aiocr.ui.json` (가장 최근 폴더) |
-| 하네스 응답 | `표본결과/{folder}/{file}.harness.json` |
-| 채점 | `표본결과/{folder}/{file}.grade.json` (`grade_samples.grade_file` 결과) |
-| 전처리 이미지 | `PRE_DIR/{folder}/{file}.p{page}.png` 또는 `{file}.png` (기본 `out/ao-pre-image`, 없으면 없음) |
+```text
+storage/bundles/{bundle_id}/
+├── original/      원본 이미지 (png/jpg/jpeg/tif/tiff/bmp/webp)
+├── preprocessed/  전처리 이미지
+├── ao_extract/    AO 응답 JSON          (읽기 전용)
+├── harness/       하네스 응답 JSON       (읽기 전용)
+├── golden/        정답지 JSON           (유일한 편집 대상)
+└── _state.json    {"name": "...", "created_at": "...", "review": {"<doc_id>": "done|progress"}}
+```
 
-비교 셀은 `grade_samples.grade_file()`의 `Cell`을 그대로 쓴다. `row`가 `DC`로 시작하는 셀(Docraft 전용 행)은 제외한다.
-셀 id는 `"{area}|{container}|{row}|{key}"`이다. area는 `필드`·`그룹`·`표`이고, row는 표의 정답 행 번호(1부터), `결과N`(결과에만 있는 행) 또는 `""`이다.
+`bundle_id` 는 업로드 시각 기반 slug(`20260928-2113-ab12`)다. 번들 이름은 업로드한 폴더/ZIP 이름이다.
 
-## 상태(status)
+### 업로드 파일 분류 (폴더명 유연 처리)
 
-`ao_verdict`와 `h_verdict`는 `일치`·`불일치`·`누락`·`오검출`·`제외` 중 하나이며, 이 두 값으로 status를 정한다.
+업로드된 각 파일의 상대 경로에서 종류(kind)를 정한다. 경로 요소(소문자) 중 하나가 아래에 맞으면 그 kind 다. 맨 먼저 맞는 규칙을 쓴다.
+
+| kind | 폴더명 | 파일명 접미사(폴더로 못 정할 때) |
+|---|---|---|
+| golden | `golden`, `answer`, `answers`, `정답`, `정답지` | `.answer.json`, `.golden.json` |
+| harness | `harness`, `하네스` | `.harness.json` |
+| ao_extract | `ao_extract`, `ao`, `aiocr`, `extract` | `.aiocr.json`, `.ao.json` |
+| preprocessed | `preprocessed`, `pre`, `processed`, `전처리` | — |
+| original | `original`, `origin`, `원본`, `images` | 폴더로 못 정한 이미지 |
+
+분류되지 않은 JSON·그 밖의 파일은 무시한다. `__MACOSX`, `.` 으로 시작하는 파일도 무시한다.
+
+### 문서 ID (stem)
+
+`파일명 → 확장자 제거 → 알려진 접미사 제거` 를 반복한다. 제거 대상: 이미지 확장자, `.json`, `.answer`, `.golden`, `.harness`, `.aiocr`, `.ao`, `.draft`, 이미지 뒤 `.p{n}`(페이지).
+예: `ABC001.jpg`, `ABC001.png`, `ABC001.json`, `ABC001.tif.aiocr.json` → `ABC001`.
+하위 폴더(문서 종류 폴더 등)는 ID 에 넣지 않는다. 같은 kind 에 같은 ID 가 둘 이상이면 뒤의 것을 `ID~2` 로 둔다.
+저장 시 파일명은 `{kind}/{doc_id}{원래 확장자}` (JSON 은 `{doc_id}.json`).
+
+## 정답지(Golden Set) 형식 = AO 추출 결과 형식
+
+정답지는 AO 응답과 같은 구조다. 별도 포맷을 만들지 않는다.
+
+```json
+{"documents": [{
+  "doc_type": "진료비영수증",
+  "extracted_fields": [{"key": "발행일", "value": "20220228", "dtype": "string"}],
+  "extracted_groups": [{"key": "환자정보", "fields": [{"key": "성명", "value": "홍길동", "dtype": "string"}]}],
+  "extracted_tables": [{"key": "항목내역", "headers": ["항목", "금액"],
+     "rows": [[{"key": "항목", "value": "진찰료", "dtype": "string"}, {"key": "금액", "value": "35000", "dtype": "int"}]]}]
+}]}
+```
+
+- 셀(cell) = `{"key", "value", "dtype"}` 이 필수이고 AO 가 주는 나머지 키(confidence, masked_value …)는 있으면 보존한다.
+- 문서가 여러 개(`documents[i]`)일 수 있다. 비교·편집은 `documents` 전체를 대상으로 하고 경로에 `documents[i]` 를 붙인다(아래).
+- **Harness 값**: 하네스 JSON 셀의 `harness.final_value` 가 있으면 그것, 없으면 `value`. (`value` 는 AO 원래 값이다.) 하네스 셀의 `harness` 블록이 근거(evidence)다.
+- 초안 생성:
+  - `ao` → AO JSON 을 그대로 복사.
+  - `harness` → 하네스 JSON 복사 후 각 셀 `value` 를 하네스 값으로 바꾸고, 셀·표·문서의 `harness` 키와 최상위 `harness`·`meta` 를 뺀다.
+  - `empty` → `{"documents":[{"doc_type":"","extracted_fields":[],"extracted_groups":[],"extracted_tables":[]}]}`
+  - 셀 편집 시 없는 `dtype` 은 `"string"`.
+
+### 셀 경로(path)
+
+하네스 fallback 에 쓰인 표기와 같다.
+- `documents[0].fields[발행일]`
+- `documents[0].groups[환자정보].fields[성명]`
+- `documents[0].tables[항목내역].rows[3].cells[금액]` (rows 는 0부터)
+
+## 비교·채점
+
+정답지를 기준으로 AO·Harness 를 셀 단위로 비교한다(`backend/compare.py`).
+
+- 문서는 index 로 짝짓는다(`documents[i]`).
+- 필드·그룹 필드: key 로 짝짓는다. 그룹 이름이 다르면 같은 key 를 다른 그룹·최상위 필드에서도 찾는다.
+- 표: key 로 짝짓는다. 행은 `difflib.SequenceMatcher` 로 행 서명(정규화한 첫 열 값 + 나머지 열 앞 4글자)을 맞춰 짝짓는다. 정답에 없는 결과 행의 셀은 `EXTRA`, row 는 `+{결과 행 index}`.
+- 정규화(`norm`): None→None, 공백 제거·trim, `""/"-"/"null"/"None"/"[]"` → `""`, 전각→반각(NFKC), 숫자형(쉼표·원·공백 제거 후 `-?\d+(\.\d+)?`)은 숫자로 비교(`35,000` = `35000` = `35000.0`), 날짜형(`2026-09-01`, `2026.9.1`, `2026년 9월 1일`, `20260901`)은 `YYYYMMDD` 로 비교.
+- 상태:
 
 | status | 조건 |
 |---|---|
-| `제외` | h_verdict == 제외 |
-| `일치` | AO 일치, 하네스 일치 |
-| `보정성공` | AO 불일치, 하네스 일치 |
-| `악화` | AO 일치, 하네스 불일치 |
-| `보정실패` | 둘 다 불일치이고 ao ≠ harness (하네스가 값을 바꿨지만 틀림) |
-| `미검출` | 둘 다 불일치이고 ao == harness (하네스가 못 잡음) |
+| `MATCH` | norm(정답) == norm(결과) (둘 다 `""` 포함) |
+| `MISSING` | 정답 값 있음, 결과 셀 없음 또는 `""` |
+| `EXTRA` | 정답 셀 없음 또는 `""`, 결과 값 있음 |
+| `TYPE_MISMATCH` | 정답 dtype 이 `int`/`float`/`number` 인데 결과가 숫자가 아님(비어 있지 않음), 또는 정답은 표인데 결과는 같은 key 의 스칼라 |
+| `MISMATCH` | 그 밖의 다름 |
 
-`kind`는 h_verdict가 `누락`이면 `누락`, `오검출`이면 `오탐`, 그 밖에는 `""`이다.
+- 정확도 = MATCH / (전체 셀 수). 전체 셀 수 0 이면 null.
 
-## GET /api/docs
-문서 목록(grade.json 기반, 빠름).
+## 엔드포인트
+
+### POST /api/bundles  (multipart)
+- `files`: 여러 파일. 파일명은 상대 경로(`webkitRelativePath`)를 그대로 쓴다. ZIP 이 하나면 풀어서 처리한다(zip slip 방지).
+- `name`: 선택.
+- 응답: `GET /api/bundles/{id}` 와 같음. 201.
+
+### GET /api/bundles
+`[{"id","name","created_at","counts":{"docs":0,"golden":0,"reviewed":0,"error":0}}]` 최신순.
+
+### DELETE /api/bundles/{id}
+번들 폴더 삭제. 204.
+
+### GET /api/bundles/{id}
 ```json
-[{"folder":"진단서","file":"x.tif","doc_type":"진단서","ao_acc":0.90,"h_acc":1.0,
-  "counts":{"일치":19,"보정성공":2,"미검출":0,"보정실패":0,"악화":0,"제외":6},
-  "errors":0, "review":"done|progress|", "checked":3, "edited":1}]
+{"id":"","name":"","created_at":"",
+ "docs":[{"id":"document_001",
+   "has":{"original":true,"preprocessed":false,"ao_extract":true,"harness":true,"golden":true},
+   "errors":["harness: JSON parse error: ..."],
+   "review":"done|progress|",
+   "doc_type":"진료비영수증",
+   "score":{"ao":{"MATCH":10,"MISMATCH":1,"MISSING":0,"EXTRA":0,"TYPE_MISMATCH":0,"total":11,"accuracy":0.909},
+            "harness":{...}}}],
+ "summary":{"docs":0,"golden":0,"reviewed":0,"pending":0,"missing":0,"error":0,
+            "score":{"ao":{...},"harness":{...}}}}
 ```
-`errors`는 미검출·보정실패·악화 셀의 합이다(보정성공은 제외).
+- `score` 는 golden 이 있고 대상 JSON 이 있을 때만 계산, 없으면 해당 키 null.
+- `missing` = original·ao_extract·harness·golden 중 하나라도 없는 문서 수. `error` = errors 가 있는 문서 수.
+- docs 는 id 오름차순(자연 정렬).
 
-## GET /api/doc/{folder}/{file}
+### GET /api/bundles/{id}/docs/{doc_id}
 ```json
-{"folder":"","file":"","doc_type":"","pages":2,"processed":false,
- "notes":"정답지 메모","uncertain":["..."],
- "summary":{"채점칸":21,"AO정확도":0.9,"하네스정확도":1.0,"개선":2,"악화":0},
- "harness_doc":{"tier":"repaired","summary":{},"rule_results_summary":{},"review_paths":[]},
- "review":{"status":"done|progress|","checked":["<id>"],"edited":{"<id>":{"from":"","to":"","by":"ao|harness|manual","at":""}},"at":""},
- "cells":[{"id":"","area":"표","container":"병명내역","row":"1","label":"M751 / ...","key":"병명",
-   "answer":"", "ao":"", "harness":"", "ao_verdict":"불일치","h_verdict":"일치",
-   "status":"보정성공","kind":"","effect":"개선","source":"rule_derived","tier":"repaired",
-   "masked":false,"uncertain":false,"editable":true,
-   "confidence":0.99,
-   "bbox":[{"page":1,"box":[0.87,0.18,0.03,0.008]}],
-   "evidence":{"tier":"","correction_basis":"","decision_rule_no":"","ao_value":"","final_value":"",
-               "rule":[{"rule_id":"","category":"","severity":"","result":"pass|fail|warn|not_applicable","detail":""}],
-               "reread":{"status":"","value":"","engine_id":"","detail":""},"master":{"status":""}} ,
-   "path":"groups[환자정보].fields[이름]"}]}
+{"id":"","has":{...},"errors":[],"review":"",
+ "pages":{"original":1,"preprocessed":0},
+ "golden":{...}|null, "ao":{...}|null, "harness":{...}|null,
+ "compare":[{"path":"documents[0].groups[환자정보].fields[성명]","doc":0,"area":"field|group|table",
+   "container":"환자정보","row":"","key":"성명","dtype":"string",
+   "golden":"홍길동","ao":"홍길동","harness":"홍길동",
+   "ao_status":"MATCH","harness_status":"MATCH",
+   "evidence":{...harness 블록...}|null, "ao_confidence":0.99|null, "bbox":null}],
+ "score":{"ao":{...}|null,"harness":{...}|null},
+ "prev":"doc id|null","next":"doc id|null"}
 ```
-- `bbox`는 AO UI `token_bbox`에서 가져온 정규화 좌표 `[x,y,w,h]`이며 **전처리 이미지 좌표계** 기준이다. 원본 이미지에 겹치면 근사치다. bbox가 없으면 `[]`이다.
-- `evidence`는 하네스 셀의 `harness` 블록이다. 없으면 `null`이다.
-- `editable`은 정답지 draft에 해당 칸이 있으면 true이다(`결과N` 행은 false).
+- golden 이 없으면 compare 는 AO 셀 기준으로 golden=null, 상태 `""` 로 채워서 보여 준다(값 비교만).
+- JSON 파싱 실패 파일은 null 이고 errors 에 기록.
+- `bbox`: 셀에 `bbox`(`[{"page":1,"box":[x,y,w,h]}]` 정규화 좌표)가 있으면 그대로 전달. 없으면 null. 스키마를 지어내지 않는다.
 
-## GET /api/image/{folder}/{file}?view=original|processed&page=1
-PNG를 반환한다(TIFF는 변환해 `.cache/`에 저장). 응답 헤더 `X-Image-View`는 실제로 반환한 종류다. processed가 없으면 original을 주고 `X-Image-Fell-Back: true`를 붙인다.
+### GET /api/bundles/{id}/docs/{doc_id}/image?view=original|preprocessed&page=1
+이미지 반환. TIFF/BMP 는 PNG 로 변환해 `storage/.cache/` 에 둔다(여러 페이지 TIFF 지원). 없으면 404. 헤더 `X-Pages`.
 
-## GET /api/raw/{folder}/{file}/{kind}
-`kind`는 `answer`·`draft`·`ao`·`ao_ui`·`harness`·`grade` 중 하나이며, 해당 JSON을 그대로 반환한다. 파일이 없으면 404이다.
+### GET /api/bundles/{id}/docs/{doc_id}/raw/{kind}
+kind = `ao_extract|harness|golden`. 파일 그대로(파싱 실패여도 원문 텍스트). 없으면 404.
 
-## PUT /api/doc/{folder}/{file}
-```json
-{"edits":[{"id":"<cell id>","value":"새 값 또는 null","by":"ao|harness|manual"}],
- "add_rows":[{"container":"항목내역","row":"결과3","by":"ao|harness"}],
- "review":{"status":"done|progress|","checked":["<id>"]}}
-```
-처리 순서는 다음과 같다.
-1. draft를 수정한다. `add_rows`는 결과 행의 값을 headers 순서로 모아 정답 표 끝에 붙인다.
-2. 정답지 빌드본을 `convert`로 다시 쓴다. `meta.review`를 포함한다.
-3. `grade_file`로 다시 채점하고 grade.json을 갱신한다.
-4. 갱신된 `GET /api/doc` 응답을 반환한다.
+### POST /api/bundles/{id}/docs/{doc_id}/golden  `{"from":"ao|harness|empty"}`
+정답지가 이미 있으면 409. 원본이 없으면 404. 생성 후 `GET docs/{doc_id}` 응답.
 
-수정 이력은 draft의 `review.edited`에 남는다. 처음 저장할 때 원본 draft를 `_draft/_backup/`에 한 번 복사한다.
+### PUT /api/bundles/{id}/docs/{doc_id}/golden  `{"golden":{...AO 형식...}}`
+형식 검증(`documents` 배열, 각 셀에 key) 실패 시 422. 임시 파일에 쓰고 rename(원자적). 응답: `GET docs/{doc_id}`.
 
-## GET /api/stats?folder=
-문서종류별과 전체 집계를 반환한다: 문서 수, 채점칸, AO정확도, 하네스정확도, 보정성공, 보정실패, 악화, 미검출, 누락, 오탐, 하네스 수정 칸 수(ao ≠ harness), 검수완료 문서 수.
+### DELETE /api/bundles/{id}/docs/{doc_id}/golden
+204.
 
-## GET /api/export.xlsx?folder=
-openpyxl로 만든 Excel을 반환한다. 시트 구성은 다음과 같다.
-- `요약`: /api/stats와 같은 내용
-- `문서별`: 파일별 정확도, 상태 카운트, 검수 상태
-- `검수결과`: 셀 단위. 문서종류, 파일, 구역, 그룹/표, 행, 행라벨, 필드, Golden, AO, Harness, AO↔Golden, Harness↔Golden, 상태, 유형, 수정여부, 수정출처, 검수확인, Evidence(요약 문자열)
-- `RawJSON`: 파일, 종류(answer/ao/harness), JSON(32,000자 단위로 열을 나눔)
+### PUT /api/bundles/{id}/docs/{doc_id}/review  `{"review":"done|progress|"}`
+`_state.json` 갱신. 204.
+
+### GET /api/bundles/{id}/export/golden.zip
+`golden/*.json` 을 묶은 ZIP.
+
+### GET /api/bundles/{id}/export/golden.xlsx[?doc={doc_id}]
+openpyxl. 시트:
+- `요약`: 문서별 id, doc_type, 검수 상태, AO/Harness MATCH·MISMATCH·MISSING·EXTRA·TYPE_MISMATCH·정확도, 마지막 행 합계.
+- `필드`: 문서, 문서index, 구역(필드/그룹), 그룹, key, value, dtype.
+- `표`: 표마다 헤더 행(문서·표 이름·headers…) 뒤에 행을 펼쳐 쓴다(한 행 = 표의 한 행, 열 = headers). 표 사이에 빈 줄.
+- `비교`: compare 셀 전체. 문서, path, 구역, 그룹/표, 행, key, Golden, AO, AO 상태, Harness, Harness 상태.
+상태 셀은 색(MATCH 초록, MISMATCH 빨강, MISSING 주황, EXTRA 보라, TYPE_MISMATCH 노랑)을 칠한다.

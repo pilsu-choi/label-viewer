@@ -3,12 +3,14 @@ type: implementation
 title: AO–Harness Golden Set 검수 Viewer
 description: 표본결과 7종 210건의 정답지·AO·하네스 값을 칸 단위로 비교하고, 이미지 위치·하네스 근거를 한 화면에서 보며 정답지를 고쳐 저장하고 Excel로 내보내는 검수 도구
 tags: [label-viewer, golden-set, review, harness, evidence, bbox, excel]
-status: active
+status: deprecated
 ---
 
 날짜: 2026-09-28
 브랜치: `feat/golden-viewer` (`dev` 기반) → `dev`·`main` 병합
 워크트리: `label_veiwer/.worktrees/golden-viewer`
+
+> **Deprecated**: [번들 기반 Golden Set 관리 Web App](2026-09-28-bundle-golden-viewer.md)으로 대체됐다. 이 문서의 코드(`app.py`, `static/`)는 삭제됐다.
 
 ## 목적
 
