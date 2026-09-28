@@ -17,6 +17,7 @@ status: active
 
 - [Label Viewer 양식 불일치 표시와 문서 분류 판정 검토](2026-09-29-doc-type-mismatch.md): 검수자 문서 종류 확정·7종 양식 템플릿, 분류 채점과 오분류 필드 집계 제외 구현 내용 추가.
 - [Label Viewer 양식 불일치 표시·문서 종류 확정·분류 채점](2026-09-29-doc-type-mismatch.md): 상세 화면이 열리지 않던 배지 배열 렌더링 오류 수정과 브라우저 확인 결과 추가.
+- [Label Viewer 양식 불일치 표시·문서 종류 확정·분류 채점](2026-09-29-doc-type-mismatch.md): 정적 파일 `Cache-Control: no-cache` 적용 기록.
 
 ### Creation
 

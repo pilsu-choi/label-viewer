@@ -15,6 +15,14 @@ from . import bundle as B
 from . import export as E
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+NO_CACHE = {"Cache-Control": "no-cache"}  # 배포 뒤 예전 JS 모듈을 쓰지 않도록 매번 재검증
+
+
+class NoCacheStatic(StaticFiles):
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers.update(NO_CACHE)
+        return resp
 
 
 def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
@@ -111,13 +119,13 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
                          headers={"Content-Disposition": f'attachment; filename="{bundle_id}-golden.xlsx"'})
 
     if FRONTEND_DIR.is_dir():
-        app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+        app.mount("/static", NoCacheStatic(directory=str(FRONTEND_DIR)), name="static")
 
     @app.get("/")
     def index():
         idx = FRONTEND_DIR / "index.html"
         if idx.exists():
-            return FileResponse(idx)
+            return FileResponse(idx, headers=NO_CACHE)
         raise HTTPException(404, "frontend not built")
 
     return app
