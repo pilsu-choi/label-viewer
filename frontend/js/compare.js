@@ -416,7 +416,9 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
       if (r) r.focus({ preventScroll: true });
     } else if (focusedRowkey) {
       const r = tableWrap.querySelector(`tr.cmp-rowgroup[data-rowkey="${CSS.escape(focusedRowkey)}"]`);
-      if (r && r.tabIndex === 0) r.focus({ preventScroll: true });
+      // 펼쳐진 헤더는 이동 대상이 아니므로 첫 데이터 행으로 포커스를 옮긴다.
+      const target = r && (r.tabIndex === 0 ? r : r.nextElementSibling);
+      if (target) target.focus({ preventScroll: true });
     }
   }
 
