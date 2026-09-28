@@ -504,21 +504,21 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .table-head-row { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .table-head-row input { flex: 1; height: var(--h-sm); font-size: var(--fs-md); font-weight: 600; }
 .gs-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); }
-.gs-table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
-.gs-table th, .gs-table td { padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); }
-.gs-table tr > :last-child { border-right: 0; }
+.gs-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+.gs-table th, .gs-table td { padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); min-width: 96px; }
+.gs-table tr > :last-child { border-right: 0; min-width: 32px; }
 .gs-table tbody tr:last-child td { border-bottom: 0; }
 .gs-table th { background: var(--surface-2); font-size: var(--fs-xs); }
 .gs-table th input[type="text"] { font-weight: 600; color: var(--ink-2); }
 .gs-col-head { position: relative; display: flex; align-items: center; }
-.gs-col-head input[type="text"] { padding-right: 23px; }
+.gs-col-head:hover input[type="text"], .gs-col-head:focus-within input[type="text"] { padding-right: 23px; }
 .gs-col-delete { position: absolute; right: 2px; top: 50%; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; transform: translateY(-50%); border: 0; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-3); opacity: 0; cursor: pointer; transition: opacity .12s, color .12s, background .12s; }
 .gs-col-head:hover .gs-col-delete, .gs-col-head:focus-within .gs-col-delete, .gs-col-delete:focus-visible { opacity: 1; }
 .gs-col-delete:hover { background: var(--bad-soft); color: var(--bad); }
 .badge[title], .sc-legend [title], .cmp-toolbar [title] { cursor: help; }
 .gs-table input[type="text"] { width: 100%; height: var(--h-md); border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .gs-table input[type="text"]:focus { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
-.gs-table td.rowhandle, .gs-table th.rowhandle { width: 32px; text-align: center; color: var(--ink-3); background: var(--surface-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.gs-table td.rowhandle, .gs-table th.rowhandle { width: 32px; min-width: 32px; text-align: center; color: var(--ink-3); background: var(--surface-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .gs-table-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 
 .advanced-json textarea { width: 100%; min-height: 300px; }
