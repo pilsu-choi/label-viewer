@@ -33,15 +33,21 @@ python3 scripts/make_dummy_bundle.py --out samples/dummy_bundle   # samples/dumm
 
 ## 실전형 더미 번들 (`dummy2`)
 
-`e2e/표본결과`의 실제 문서 14건을 이미지·원본 AO 응답·Harness 응답·정답지로 묶는다(문서 종류별 2건). 사용 가능한 AO UI sidecar도 함께 복사해 셀 bbox를 확인할 수 있다. 파일명은 D2 별칭으로 바뀌고, 원본 파일 바이트와 JSON 내용은 그대로 복사된다. 별칭 덕분에 원본의 환자 식별자가 번들 파일명에 포함되지 않지만, 이미지와 JSON 본문에는 개인정보와 의료 정보가 남아 있다.
+`e2e/표본결과`의 실제 문서 14건을 이미지·AO 응답·Harness 응답·정답지로 묶는다(문서 종류별 2건). 기본 `ui` 형식은 UI response를 `ao_extract/`에 넣어 Golden·Compare·bbox 입력으로 정규화하며, Raw JSON에서는 원문을 보여 준다. 파일명은 D2 별칭으로 바뀌고, 원본 파일 바이트와 JSON 내용은 그대로 복사된다. 별칭 덕분에 원본의 환자 식별자가 번들 파일명에 포함되지 않지만, 이미지와 JSON 본문에는 개인정보와 의료 정보가 남아 있다.
 
 ```bash
 python3 scripts/make_dummy2.py --source-root ../e2e/표본결과 --out samples/dummy2
 ```
 
-AO UI sidecar 경로는 실행에서 자동 탐색한다. 별도 위치를 쓸 때는 `--ui-root <ao-ui-run-directory>`를 지정한다. sidecar 없이 생성하려면 빈 디렉터리를 `--ui-root`로 지정한다.
+AO UI response 경로는 실행에서 자동 탐색한다. 별도 위치를 쓸 때는 `--ui-root <ao-ui-run-directory>`를 지정한다. 기본 `--ao-format ui`는 `ao_extract/`에 `.aiocr.ui.json`을 만들며, `--ao-format classic`은 `.aiocr.json` AO Extract와 선택적 `ao_ui/` sidecar를 별도 폴더에 만든다.
 
-기본 경로는 형제 디렉터리 `../e2e/표본결과`, AO UI sidecar의 `../e2e/out/ao-ui-205-20260927-204626`, 출력 `samples/dummy2`이다. 다른 AO UI 실행 결과를 쓰려면 `--ui-root`를 지정한다. 생성물은 `original/`, `ao_extract/`, `harness/`, `golden/`, `ao_ui/` 폴더 및 `samples/dummy2.zip`이다. 전처리 이미지는 이 표본에 없으므로 뷰어의 전처리 버튼은 비활성화된다. AO 파일은 변환된 Harness 입력(`.aiocr.adapted.json`)이 아니라 원본 `.aiocr.json`이고, 정답지는 원본 `.answer.json`이다. 원본 경로와 SHA-256은 `provenance.local.json`에 기록하며 ZIP에는 넣지 않는다.
+classic 형식은 기본 UI 번들을 덮어쓰지 않도록 별도 출력 경로를 사용한다.
+
+```bash
+python3 scripts/make_dummy2.py --source-root ../e2e/표본결과 --out samples/dummy2-classic --ao-format classic
+```
+
+기본 경로는 형제 디렉터리 `../e2e/표본결과`, AO UI response의 `../e2e/out/ao-ui-205-20260927-204626`, 출력 `samples/dummy2`이다. 다른 AO UI 실행 결과를 쓰려면 `--ui-root`를 지정한다. 기본 UI 형식 출력은 `original/`, `ao_extract/`, `harness/`, `golden/` 4개 자료 폴더다. classic 형식은 여기에 선택적 `ao_ui/` sidecar 폴더를 추가한다. 전처리 이미지는 이 표본에 없으므로 뷰어의 전처리 버튼은 비활성화된다. classic AO 파일은 변환된 Harness 입력(`.aiocr.adapted.json`)이 아니라 원본 `.aiocr.json`이고, 정답지는 원본 `.answer.json`이다. 원본 경로와 SHA-256은 `provenance.local.json`에 기록하며 ZIP에는 넣지 않는다.
 
 이 세트는 로컬 검수용이다. 공유하거나 배포하기 전에는 이미지, AO/Harness JSON, 정답지의 식별 정보와 민감 정보를 함께 비식별화해야 한다. 상세한 샘플 목록과 생성 규칙은 [실전형 dummy2 샘플 번들](wiki/2026-09-28-realistic-dummy2.md)을 참고한다.
 
@@ -51,15 +57,16 @@ AO UI sidecar 경로는 실행에서 자동 탐색한다. 별도 위치를 쓸 �
 bundle/
 ├── original/      document_001.png | .jpg | .tif
 ├── preprocessed/  document_001.png
-├── ao_extract/    document_001.json       (또는 document_001.tif.aiocr.json)
-├── ao_ui/         document_001.aiocr.ui.json (선택: AO UI bbox sidecar)
+├── ao_extract/    document_001.json | document_001.aiocr.json | document_001.aiocr.ui.json
+├── ao_ui/         document_001.aiocr.ui.json (선택: 별도 UI bbox sidecar)
 ├── harness/       document_001.json       (또는 .harness.json)
 └── golden/        document_001.json       (또는 .answer.json)
 ```
 
-- 폴더 이름은 조금 달라도 인식한다(`원본`, `전처리`, `aiocr`, `정답` 등). 폴더로 종류를 정할 수 없으면 파일명 접미사(`.aiocr.json`, `.harness.json`, `.answer.json`)로 정한다.
+- **AO 추출 입력**은 `ao_extract/`에 둔다. `.aiocr.json`은 기존 AO 추출 JSON이고, `.aiocr.ui.json`은 UI response JSON(`documents[].result`)이다. UI response는 Golden·Compare·bbox에 사용할 수 있도록 AO 구조로 정규화하며, Raw JSON 탭은 업로드 원문을 보여 준다.
+- **별도 AO UI sidecar**는 선택 사항이며 `ao_ui/` 또는 `aiocr_ui/`에 둔다. stem이 같은 문서의 bbox 근거로 쓰인다. `ao_ui/`만 있는 업로드는 문서 입력으로 간주하지 않는다. `ao_extract/`의 `.aiocr.ui.json`은 유효한 AO 입력이다.
+- 폴더 이름은 조금 달라도 인식한다(`원본`, `전처리`, `aiocr`, `정답` 등). 번들 파일은 stem이 같으면 같은 문서로 묶인다.
 - 확장자와 알려진 접미사를 뗀 파일명(stem)이 같으면 같은 문서로 묶는다. 빠진 파일이 있어도 번들 전체가 실패하지 않고, 해당 문서에 Missing이나 오류로만 표시된다.
-- 선택적으로 `ao_ui/` 또는 `aiocr_ui/` 폴더나 `.aiocr.ui.json` 파일명으로 AO UI sidecar를 추가할 수 있다. 이 sidecar는 비교 셀의 `token_bbox` 위치 정보를 연결하는 데 쓰이며 AO 추출 값이나 점수는 바꾸지 않는다.
 - 업로드한 번들은 `storage/bundles/{id}/`에 저장된다. AO와 Harness JSON은 읽기만 하고, 수정하는 것은 `golden/`뿐이다.
 
 ## 정답지 형식
@@ -80,7 +87,7 @@ bundle/
 
 상세 화면은 문서 목록, 이미지 뷰어, Golden Set 검수 영역을 하나의 작업 공간에 배치한다. 왼쪽 목록에서 ID·유형을 검색하고 검수 상태로 거를 수 있다. 중앙에서 원본과 전처리 이미지를 확인하며, 우측의 Golden 편집 행에서 AO·Harness 값을 비교하고 바로 채택할 수 있다. 편집 행이나 비교 항목에 마우스를 올리면 비교값·상태·근거가 나타난다. 비교 데이터에 bbox가 연결돼 있으면 강조 테두리로 이미지 위치를 표시하고 bbox 주변으로 확대한다. hover가 끝나면 이전 확대·이동 상태를 복원한다.
 
-우측의 비교 탭은 mismatch·missing·extra를 필터링하고 상태별 설명을 hover로 확인한다. Raw JSON 탭은 Golden·AO·Harness 원문을 접고 펼칠 수 있는 트리로 보여 주며, 키·값 검색과 복사를 지원한다. Golden 표 편집에서는 열 삭제와 행·열 추가 뒤 새 편집 위치로 포커스를 옮긴다. Reconstructed View는 Golden·AO·Harness 데이터를 HTML 또는 Markdown으로 보여 준다. 문서 목록과 이미지, 이미지와 검수 패널, 검수 패널과 재구성 뷰 사이의 경계를 끌어 크기를 조절할 수 있다. Golden 편집은 기본적으로 1.5초 뒤 자동 저장된다.
+우측의 비교 탭은 mismatch·missing·extra를 필터링하고 상태별 설명을 hover로 확인한다. Raw JSON 탭은 Golden·AO Extract·Harness 원문을 접고 펼칠 수 있는 트리로 보여 주며, 별도 `ao_ui/` sidecar가 있으면 AO UI 원문 선택지도 표시한다. `ao_extract/`의 UI response는 AO Extract 원문 선택에서 정규화 전 입력 그대로 확인할 수 있다. 처음에는 사용 가능한 첫 원본을 선택하고, 키·값 검색과 복사를 지원한다. Golden 표 편집에서는 열 삭제와 행·열 추가 뒤 새 편집 위치로 포커스를 옮긴다. Reconstructed View는 Golden·AO·Harness 데이터를 HTML 또는 Markdown으로 보여 준다. 문서 목록과 이미지, 이미지와 검수 패널, 검수 패널과 재구성 뷰 사이의 경계를 끌어 크기를 조절할 수 있다. Golden 편집은 기본적으로 1.5초 뒤 자동 저장된다.
 
 ## 단축키 (상세 화면)
 
