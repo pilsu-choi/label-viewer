@@ -161,29 +161,29 @@ export function renderDetail(root, bundleId, docId) {
     document.addEventListener('keydown', onKeydown);
     setNavGuard(() => (editor && editor.isDirty() && !editor.isAutosaveOn()) ? '저장하지 않은 변경사항이 있습니다.' : true);
 
-    saveStateEl = el('span', { class: 'save-state' }, 'Saved');
+    saveStateEl = el('span', { class: 'save-state saved' }, '저장됨');
     reviewInput = el('input', { type: 'checkbox', checked: doc.review === 'done',
       onchange: (e) => { const review = e.target.checked ? 'done' : ''; api.putReview(bundleId, docId, review).then(() => { doc.review = review; syncDocumentRail(); toast('검수 상태를 변경했습니다.'); }).catch((err) => { e.target.checked = doc.review === 'done'; toast(err.message, 'error'); }); } });
 
     const topbar = el('div', { class: 'topbar detail-topbar' }, [
       el('a', { class: 'brand', href: '#/' }, 'Label Viewer'),
       el('div', { class: 'sep' }),
-      el('a', { class: 'back', href: `#/b/${encodeURIComponent(bundleId)}` }, [icon('left'), '목록']),
+      el('a', { class: 'btn ghost', href: `#/b/${encodeURIComponent(bundleId)}` }, [icon('chevron-left'), '목록']),
       el('div', { class: 'nav-group' }, [
-        el('button', { class: 'btn btn-icon', disabled: !doc.prev, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.prev)}`), title: '이전 문서 (←)', 'aria-label': '이전 문서' }, icon('left')),
-        el('button', { class: 'btn btn-icon', disabled: !doc.next, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.next)}`), title: '다음 문서 (→)', 'aria-label': '다음 문서' }, icon('right')),
+        el('button', { class: 'btn ghost icon', disabled: !doc.prev, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.prev)}`), title: '이전 문서 (←)', 'aria-label': '이전 문서' }, icon('chevron-left')),
+        el('button', { class: 'btn ghost icon', disabled: !doc.next, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.next)}`), title: '다음 문서 (→)', 'aria-label': '다음 문서' }, icon('chevron-right')),
       ]),
       el('div', { class: 'title' }, [doc.id, doc.golden && doc.golden.documents && doc.golden.documents[0] && doc.golden.documents[0].doc_type ? el('small', {}, doc.golden.documents[0].doc_type) : null]),
       el('div', { class: 'grow' }),
       saveStateEl,
-      el('button', { class: 'btn btn-primary btn-sm', title: 'Ctrl+S', onclick: () => editor && editor.save() }, '저장'),
-      el('label', { class: 'review-toggle' }, [reviewInput, '검수 완료']),
+      el('button', { class: 'btn primary sm', title: 'Ctrl+S', onclick: () => editor && editor.save() }, '저장'),
+      el('label', { class: 'switch' }, [reviewInput, '검수 완료']),
       exportMenu(),
-      el('button', { class: 'btn btn-ghost btn-icon', title: '단축키 (?)', onclick: openHelp }, '?'),
+      el('button', { class: 'btn ghost icon', title: '단축키 (?)', 'aria-label': '단축키', onclick: openHelp }, icon('help-circle')),
     ]);
 
     // --- 좌측: 이미지 뷰어 ---
-    const viewToggle = el('div', { class: 'toggle-group' }, [
+    const viewToggle = el('div', { class: 'seg' }, [
       (viewToggleBtns.original = el('button', { class: state.view === 'original' ? 'active' : '', disabled: !doc.has.original, onclick: () => { state.view = 'original'; state.page = 1; loadImage(); refreshToggle(); } }, '원본')),
       (viewToggleBtns.preprocessed = el('button', { class: state.view === 'preprocessed' ? 'active' : '', disabled: !doc.has.preprocessed, onclick: () => { state.view = 'preprocessed'; state.page = 1; loadImage(); refreshToggle(); } }, '전처리')),
     ]);
@@ -193,19 +193,19 @@ export function renderDetail(root, bundleId, docId) {
     zoomLabel = el('span', { class: 'zoom-pct' }, '100%');
     const stage = el('div', { class: 'viewer-stage' });
     pageNavEl = el('div', { class: 'page-nav', style: 'display:none' }, [
-      el('button', { class: 'btn btn-sm btn-icon', onclick: () => { state.page--; loadImage(); } }, '‹'),
+      el('button', { class: 'btn sm icon', onclick: () => { state.page--; loadImage(); } }, '‹'),
       pageLabel,
-      el('button', { class: 'btn btn-sm btn-icon', onclick: () => { state.page++; loadImage(); } }, '›'),
+      el('button', { class: 'btn sm icon', onclick: () => { state.page++; loadImage(); } }, '›'),
     ]);
     const viewerToolbar = el('div', { class: 'viewer-toolbar' }, [
       viewToggle,
       pageNavEl,
       el('div', { class: 'zoom-group' }, [
-        el('button', { class: 'btn btn-sm btn-icon', onclick: () => imgViewer.zoomOut(), title: 'Zoom out' }, '−'),
-        el('button', { class: 'btn btn-sm btn-icon', onclick: () => imgViewer.zoomIn(), title: 'Zoom in' }, '+'),
+        el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomOut(), title: 'Zoom out' }, '−'),
+        el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomIn(), title: 'Zoom in' }, '+'),
         zoomLabel,
-        el('button', { class: 'btn btn-sm', onclick: () => imgViewer.fitWidth() }, 'Fit Width'),
-        el('button', { class: 'btn btn-sm', onclick: () => imgViewer.fitPage() }, 'Fit Page'),
+        el('button', { class: 'btn sm', onclick: () => imgViewer.fitWidth() }, 'Fit Width'),
+        el('button', { class: 'btn sm', onclick: () => imgViewer.fitPage() }, 'Fit Page'),
       ]),
     ]);
     leftPanel = el('div', { class: 'detail-left' }, [viewerToolbar, stage]);
@@ -226,10 +226,10 @@ export function renderDetail(root, bundleId, docId) {
 
     editor = createGoldenEditor(tabHosts.edit, {
       bundleId, docId, doc,
-      onDirtyChange: (isDirty) => { setSaveState(isDirty ? 'dirty' : 'saved', isDirty ? 'Unsaved changes' : 'Saved'); if (state.reconSource === 'golden') drawRecon(); },
-      onSaveStart: () => setSaveState('saving', 'Saving…'),
-      onSaveOk: (updated) => { setSaveState('saved', 'Saved'); refreshAfterDocUpdate(updated); toast('저장했습니다.'); },
-      onSaveErr: () => setSaveState('dirty', 'Unsaved changes'),
+      onDirtyChange: (isDirty) => { setSaveState(isDirty ? 'dirty' : 'saved', isDirty ? '변경사항 있음' : '저장됨'); if (state.reconSource === 'golden') drawRecon(); },
+      onSaveStart: () => setSaveState('saving', '저장 중…'),
+      onSaveOk: (updated) => { setSaveState('saved', '저장됨'); refreshAfterDocUpdate(updated); toast('저장했습니다.'); },
+      onSaveErr: () => setSaveState('dirty', '변경사항 있음'),
       onGoldenCreated: (updated) => { refreshAfterDocUpdate(updated); },
       onHoverBbox,
     });
@@ -253,8 +253,8 @@ export function renderDetail(root, bundleId, docId) {
     const reconPanel = el('div', { class: 'recon-panel', style: 'height:280px' }, [
       el('div', { class: 'recon-toolbar' }, [
         el('span', { class: 'label' }, 'Reconstructed View'),
-        el('div', { class: 'toggle-group' }, [reconSourceButtons.golden, reconSourceButtons.ao, reconSourceButtons.harness]),
-        el('div', { class: 'toggle-group' }, [rendererButtons.html, rendererButtons.md]),
+        el('div', { class: 'seg' }, [reconSourceButtons.golden, reconSourceButtons.ao, reconSourceButtons.harness]),
+        el('div', { class: 'seg' }, [rendererButtons.html, rendererButtons.md]),
       ]),
       reconBody,
     ]);
@@ -331,11 +331,11 @@ export function renderDetail(root, bundleId, docId) {
     sel.golden.addEventListener('click', () => load('golden'));
     sel.ao.addEventListener('click', () => load('ao'));
     sel.harness.addEventListener('click', () => load('harness'));
-    const copyBtn = el('button', { class: 'btn btn-sm', onclick: () => {
+    const copyBtn = el('button', { class: 'btn sm', onclick: () => {
       navigator.clipboard && navigator.clipboard.writeText(pre.textContent).then(() => toast('복사했습니다.')).catch(() => toast('복사 실패', 'error'));
     } }, '복사');
     mount(tabHosts.raw, el('div', { class: 'raw-json-panel' }, [
-      el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'toggle-group' }, [sel.golden, sel.ao, sel.harness]), el('div', { class: 'grow' }), copyBtn]),
+      el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'seg' }, [sel.golden, sel.ao, sel.harness]), el('div', { class: 'grow' }), copyBtn]),
       pre,
     ]));
     load('golden');

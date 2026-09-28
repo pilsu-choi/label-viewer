@@ -110,8 +110,8 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox } = {}) {
             el('td', {}, el('div', { class: 'cmp-cell' }, [diffSpan(e.golden, e.ao), statusBadge(e.ao_status)])),
             el('td', {}, el('div', { class: 'cmp-cell' }, [diffSpan(e.golden, e.harness), statusBadge(e.harness_status)])),
             el('td', { class: 'cmp-adopt' }, [
-              onAdopt && e.ao != null && e.ao !== '' && el('button', { class: 'btn btn-sm', title: 'AO 값을 정답으로', onclick: () => onAdopt(e, e.ao) }, 'AO 채택'),
-              onAdopt && e.harness != null && e.harness !== '' && el('button', { class: 'btn btn-sm', title: 'Harness 값을 정답으로', onclick: () => onAdopt(e, e.harness) }, 'H 채택'),
+              onAdopt && e.ao != null && e.ao !== '' && el('button', { class: 'btn sm', title: 'AO 값을 정답으로', onclick: () => onAdopt(e, e.ao) }, 'AO 채택'),
+              onAdopt && e.harness != null && e.harness !== '' && el('button', { class: 'btn sm', title: 'Harness 값을 정답으로', onclick: () => onAdopt(e, e.harness) }, 'H 채택'),
             ]),
           ]);
           tbody.appendChild(tr);

@@ -111,7 +111,7 @@ export function renderUpload(root) {
         el('span', { class: 'cnt' }, [el('b', {}, String(c.golden || 0)), 'Golden']),
         el('span', { class: 'cnt' }, [el('b', {}, String(c.reviewed || 0)), '검수 완료']),
         el('span', { class: `cnt ${c.error ? 'bad' : ''}` }, [el('b', {}, String(c.error || 0)), '오류']),
-        el('button', { class: 'btn btn-ghost btn-sm', onclick: (e) => deleteBundle(b.id, e) }, '삭제'),
+        el('button', { class: 'btn ghost sm', onclick: (e) => deleteBundle(b.id, e) }, '삭제'),
       ]));
     }
     recentHost.appendChild(list);
@@ -132,7 +132,7 @@ export function renderUpload(root) {
       !state.uploading && el('div', { class: 'dz-sub' }, '같은 파일명끼리 원본·전처리·AO·Harness·Golden을 자동으로 묶습니다.'),
       state.uploading && el('div', { class: 'dz-progress' }, el('span', { style: `width:${Math.round(state.progress * 100)}%` })),
       !state.uploading && el('div', { class: 'dz-actions' }, [
-        el('button', { class: 'btn btn-primary', onclick: () => folderInput.click() }, '폴더 선택'),
+        el('button', { class: 'btn primary', onclick: () => folderInput.click() }, '폴더 선택'),
         el('button', { class: 'btn', onclick: () => zipInput.click() }, 'ZIP 선택'),
       ]),
       state.error && el('div', { class: 'dz-error' }, state.error),
