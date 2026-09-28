@@ -17,24 +17,27 @@ from PIL import Image, ImageSequence
 from .compare import compare_bundle, harness_value, score
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
-JSON_KINDS = ("ao_extract", "harness", "golden")
+JSON_KINDS = ("ao_extract", "harness", "golden", "ao_ui")
+CORE_JSON_KINDS = ("ao_extract", "harness", "golden")
 DOC_KINDS = ("original", "preprocessed", "ao_extract", "harness", "golden")
 
 _FOLDER_KEYS: dict[str, set[str]] = {
+    "ao_ui": {"ao_ui", "aiocr_ui"},
     "golden": {"golden", "answer", "answers", "정답", "정답지"},
     "harness": {"harness", "하네스"},
     "ao_extract": {"ao_extract", "ao", "aiocr", "extract"},
     "preprocessed": {"preprocessed", "pre", "processed", "전처리"},
     "original": {"original", "origin", "원본", "images"},
 }
-_KIND_ORDER = ["golden", "harness", "ao_extract", "preprocessed", "original"]
+_KIND_ORDER = ["golden", "harness", "ao_ui", "ao_extract", "preprocessed", "original"]
 _SUFFIX_KEYS: dict[str, tuple[str, ...]] = {
+    "ao_ui": (".aiocr.ui.json",),
     "golden": (".answer.json", ".golden.json"),
     "harness": (".harness.json",),
     "ao_extract": (".aiocr.json", ".ao.json"),
 }
 _STRIP_EXT = IMAGE_EXTS | {".json"}
-_STRIP_SUFFIX = {".answer", ".golden", ".harness", ".aiocr", ".ao", ".draft"}
+_STRIP_SUFFIX = {".answer", ".golden", ".harness", ".aiocr", ".ao", ".ui", ".draft"}
 _PAGE_RE = re.compile(r"\.p\d+$", re.I)
 _ID_RE = re.compile(r"^[A-Za-z0-9_\-.~]+$")
 
@@ -271,13 +274,16 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
 
     errors = []
     parsed: dict[str, dict | None] = {}
-    for k in JSON_KINDS:
+    for k in CORE_JSON_KINDS:
         data, err = load_json_safe(paths[k])
         parsed[k] = data
         if err:
             errors.append(f"{k}: {err}")
+    parsed["ao_ui"], ao_ui_err = load_json_safe(find_kind_file(bdir, "ao_ui", doc_id))
+    if ao_ui_err:
+        errors.append(f"ao_ui: {ao_ui_err}")
 
-    rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"])
+    rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"], parsed["ao_ui"])
     ids_sorted = ids
     idx = ids_sorted.index(doc_id)
     return {
@@ -313,12 +319,15 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
         has = {k: paths[k] is not None for k in DOC_KINDS}
         errors = []
         parsed: dict[str, dict | None] = {}
-        for k in JSON_KINDS:
+        for k in CORE_JSON_KINDS:
             data, err = load_json_safe(paths[k])
             parsed[k] = data
             if err:
                 errors.append(f"{k}: {err}")
-        rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"]) if parsed["golden"] else []
+        parsed["ao_ui"], ao_ui_err = load_json_safe(find_kind_file(bdir, "ao_ui", doc_id))
+        if ao_ui_err:
+            errors.append(f"ao_ui: {ao_ui_err}")
+        rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"], parsed["ao_ui"]) if parsed["golden"] else []
         sc = {"ao": score(rows, "ao") if parsed["golden"] else None,
               "harness": score(rows, "harness") if parsed["golden"] else None}
         for side in ("ao", "harness"):
@@ -374,11 +383,17 @@ def list_bundles(data_dir: Path) -> list[dict]:
                 n_golden += 1
             if review.get(doc_id) == "done":
                 n_reviewed += 1
-            for k in JSON_KINDS:
+            bad = False
+            for k in CORE_JSON_KINDS:
                 _, err = load_json_safe(find_kind_file(bdir, k, doc_id))
                 if err:
-                    n_error += 1
+                    bad = True
                     break
+            ui_path = find_kind_file(bdir, "ao_ui", doc_id)
+            if ui_path and load_json_safe(ui_path)[1]:
+                bad = True
+            if bad:
+                n_error += 1
         out.append({
             "id": bdir.name, "name": state.get("name", bdir.name), "created_at": state.get("created_at", ""),
             "counts": {"docs": len(ids), "golden": n_golden, "reviewed": n_reviewed, "error": n_error},

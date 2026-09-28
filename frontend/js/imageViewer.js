@@ -8,7 +8,7 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
   stage.appendChild(canvas);
 
   let scale = 1, tx = 0, ty = 0, natW = 0, natH = 0, imgEl = null;
-  let pendingBoxes = [];
+  let pendingBoxes = [], focusView = null;
 
   function apply() { canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; if (onZoomChange) onZoomChange(scale); }
 
@@ -81,6 +81,10 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
 
   function setBoxes(boxes) {
     pendingBoxes = boxes || [];
+    drawBoxes();
+  }
+
+  function drawBoxes() {
     clear(bboxLayer);
     for (const b of pendingBoxes) {
       bboxLayer.appendChild(el('div', {
@@ -90,8 +94,38 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
     }
   }
 
+  function focusBoxes(boxes) {
+    if (!boxes || !boxes.length || !natW) { clearFocus(); return; }
+    if (!focusView) focusView = { scale, tx, ty };
+    setBoxes(boxes);
+    const x = Math.min(...boxes.map((b) => b.x));
+    const y = Math.min(...boxes.map((b) => b.y));
+    const right = Math.max(...boxes.map((b) => b.x + b.w));
+    const bottom = Math.max(...boxes.map((b) => b.y + b.h));
+    const rectW = Math.max((right - x) * natW, 1);
+    const rectH = Math.max((bottom - y) * natH, 1);
+    const stageW = stage.clientWidth, stageH = stage.clientHeight;
+    const fitScale = Math.min(stageW / (rectW * 1.5), stageH / (rectH * 1.8));
+    scale = Math.min(8, Math.max(focusView.scale, Math.min(focusView.scale * 4, fitScale)));
+    tx = stageW / 2 - ((x + right) / 2) * natW * scale;
+    ty = stageH / 2 - ((y + bottom) / 2) * natH * scale;
+    apply();
+  }
+
+  function clearFocus() {
+    if (focusView) {
+      ({ scale, tx, ty } = focusView);
+      focusView = null;
+      apply();
+    }
+    pendingBoxes = [];
+    drawBoxes();
+  }
+
   function empty(message) {
     natW = 0; natH = 0;
+    focusView = null;
+    pendingBoxes = [];
     if (imgEl) { imgEl.remove(); imgEl = null; }
     clear(bboxLayer);
     stage.querySelectorAll('.viewer-empty').forEach((n) => n.remove());
@@ -99,7 +133,7 @@ export function createImageViewer(stage, { onZoomChange } = {}) {
   }
 
   return {
-    load, setBoxes, empty,
+    load, setBoxes, focusBoxes, clearFocus, empty,
     zoomIn: () => zoomAt(1.25), zoomOut: () => zoomAt(0.8), fitWidth, fitPage,
     getScale: () => scale,
     destroy: () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp); },

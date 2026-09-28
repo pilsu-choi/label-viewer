@@ -30,14 +30,20 @@ SAMPLES = (
 )
 KINDS = ("original", "ao_extract", "harness", "golden")
 SUFFIXES = ("", ".aiocr.json", ".harness.json", ".answer.json")
+AO_UI_RUN = "ao-ui-205-20260927-204626"
+OUTPUT_KINDS = (*KINDS, "ao_ui")
+
+
+def sample_ids():
+    counts: dict[str, int] = {}
+    for code, folder, image_name in SAMPLES:
+        counts[code] = counts.get(code, 0) + 1
+        yield f"D2-{code}-{counts[code]:03d}", folder, image_name
 
 
 def source_files(root: Path) -> list[tuple[str, str, Path]]:
     files = []
-    counts: dict[str, int] = {}
-    for code, folder, image_name in SAMPLES:
-        counts[code] = counts.get(code, 0) + 1
-        alias = f"D2-{code}-{counts[code]:03d}"
+    for alias, folder, image_name in sample_ids():
         image = root / folder / image_name
         for suffix in SUFFIXES:
             source = image if not suffix else image.with_name(image.name + suffix)
@@ -54,13 +60,25 @@ def source_files(root: Path) -> list[tuple[str, str, Path]]:
     return files
 
 
-def build(source_root: Path, out: Path) -> Path:
+def build(source_root: Path, out: Path, ui_root: Path | None = None) -> Path:
     source_root = source_root.resolve()
     out = out.resolve()
     files = source_files(source_root)
+    ui_root = ui_root.resolve() if ui_root else None
+    ui_files = []
+    for alias, folder, image_name in sample_ids():
+        source = (ui_root / folder / f"{image_name}.aiocr.ui.json") if ui_root else None
+        if source and source.is_file():
+            try:
+                payload = json.loads(source.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"invalid AO UI sample {source}: {exc}") from exc
+            if not isinstance(payload, dict) or not isinstance(payload.get("documents"), list):
+                raise ValueError(f"unexpected AO UI JSON shape: {source}")
+            ui_files.append((alias, image_name, source))
     manifest = []
     outputs = []
-    for kind in KINDS:
+    for kind in OUTPUT_KINDS:
         (out / kind).mkdir(parents=True, exist_ok=True)
     targets = [
         (out / KINDS[SUFFIXES.index(suffix)] /
@@ -68,7 +86,10 @@ def build(source_root: Path, out: Path) -> Path:
         for alias, suffix, source in files
     ]
     expected = {target for target, _, _, _ in targets}
-    for kind in KINDS:
+    ui_targets = [out / "ao_ui" / f"{alias}{Path(image_name).suffix.lower()}.aiocr.ui.json"
+                  for alias, image_name, _ in ui_files]
+    expected.update(ui_targets)
+    for kind in OUTPUT_KINDS:
         for existing in (out / kind).iterdir():
             if existing.is_file() and existing not in expected:
                 raise ValueError(f"unexpected file in output; choose a clean --out: {existing}")
@@ -80,12 +101,26 @@ def build(source_root: Path, out: Path) -> Path:
         manifest.append({
             "id": alias,
             "kind": kind,
+            "source_root": "samples",
             "source": source.relative_to(source_root).as_posix(),
             "sha256": hashlib.sha256(data).hexdigest(),
         })
 
+    for target, (alias, _, source) in zip(ui_targets, ui_files):
+        data = source.read_bytes()
+        target.write_bytes(data)
+        outputs.append(target)
+        manifest.append({
+            "id": alias,
+            "kind": "ao_ui",
+            "source_root": "ui",
+            "source": source.relative_to(ui_root).as_posix(),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        })
+
     (out / "provenance.local.json").write_text(
-        json.dumps({"source_root": str(source_root), "files": manifest}, ensure_ascii=False, indent=2) + "\n",
+        json.dumps({"source_root": str(source_root), "ui_root": str(ui_root) if ui_root else None,
+                    "files": manifest}, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     archive = out.with_suffix(".zip")
@@ -103,10 +138,16 @@ def main() -> None:
          if (parent / "e2e" / "표본결과").is_dir()),
         repo.parent / "e2e" / "표본결과",
     )
+    default_ui = next(
+        (parent / "e2e" / "out" / AO_UI_RUN for parent in (repo, *repo.parents)
+         if (parent / "e2e" / "out" / AO_UI_RUN).is_dir()),
+        None,
+    )
     parser.add_argument("--source-root", type=Path, default=default_source)
+    parser.add_argument("--ui-root", type=Path, default=default_ui)
     parser.add_argument("--out", type=Path, default=repo / "samples" / "dummy2")
     args = parser.parse_args()
-    archive = build(args.source_root, args.out)
+    archive = build(args.source_root, args.out, args.ui_root)
     print(f"generated {len(SAMPLES)} documents at {args.out.resolve()}")
     print(f"zipped to {archive}")
 

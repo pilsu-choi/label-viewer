@@ -370,7 +370,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .viewer-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
 .viewer-canvas img { display: block; max-width: none; box-shadow: 0 2px 12px rgba(0, 0, 0, .18); user-select: none; -webkit-user-drag: none; }
 .bbox-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
-.bbox-rect { position: absolute; background: var(--hl); mix-blend-mode: multiply; border-radius: 2px; box-shadow: 0 0 0 2px var(--hl); }
+.bbox-rect { position: absolute; z-index: 1; box-sizing: border-box; background: rgba(255, 208, 0, .28); border: 2px solid #d84b00; outline: 1px solid #fff; outline-offset: 1px; border-radius: 2px; box-shadow: 0 0 8px rgba(216, 75, 0, .48); }
 .viewer-empty { display: grid; place-items: center; height: 100%; color: #8b94a1; }
 
 .tabs { display: flex; gap: 4px; flex: none; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
@@ -452,6 +452,12 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .gs-table tbody tr:last-child td { border-bottom: 0; }
 .gs-table th { background: var(--surface-2); }
 .gs-table th input[type="text"] { font-weight: 600; color: var(--ink-2); }
+.gs-col-head { position: relative; display: flex; align-items: center; }
+.gs-col-head input[type="text"] { padding-right: 23px; }
+.gs-col-delete { position: absolute; right: 2px; top: 50%; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; transform: translateY(-50%); border: 0; border-radius: 3px; background: var(--surface-2); color: var(--ink-3); opacity: 0; cursor: pointer; transition: opacity .12s, color .12s, background .12s; }
+.gs-col-head:hover .gs-col-delete, .gs-col-head:focus-within .gs-col-delete, .gs-col-delete:focus-visible { opacity: 1; }
+.gs-col-delete:hover { background: var(--bad-soft); color: var(--bad); }
+.badge[title], .sc-legend [title], .cmp-toolbar [title] { cursor: help; }
 .gs-table input[type="text"] { width: 100%; height: 30px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .gs-table input[type="text"]:focus { background: var(--hl-soft); box-shadow: inset 0 0 0 2px var(--accent); }
 .gs-table td.rowhandle, .gs-table th.rowhandle { width: 32px; text-align: center; color: var(--ink-3); background: var(--surface-2); font-size: 12px; }
@@ -461,10 +467,24 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .json-error { color: var(--bad); font-size: 12.5px; font-weight: 600; }
 .raw-json-panel { display: flex; flex-direction: column; gap: 10px; height: 100%; }
 .raw-json-toolbar { display: flex; align-items: center; gap: 8px; }
-.raw-json-panel pre {
-  flex: 1; margin: 0; padding: 14px 16px; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel);
-  font-family: var(--font-code); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
-}
+.json-viewer { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: 8px; }
+.json-viewer-tools { display: flex; align-items: center; gap: 8px; }
+.json-search { width: min(320px, 70%); height: 28px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); font-size: 12px; }
+.json-count { color: var(--ink-3); font-size: 11px; }
+.json-tree { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); font: 12px/1.65 var(--font-code); }
+.json-node { min-width: max-content; }
+.json-summary { display: flex; align-items: baseline; gap: 4px; width: fit-content; cursor: pointer; list-style: none; }
+.json-summary::-webkit-details-marker { display: none; }
+.json-summary::before { width: 10px; color: var(--ink-3); content: '▸'; }
+.json-node[open] > .json-summary::before { content: '▾'; }
+.json-node > .json-primitive { padding-left: 14px; }
+.json-children { padding-left: 18px; }
+.json-key { color: #7955a1; }
+.json-string { color: #167548; white-space: pre-wrap; }
+.json-number { color: #195caa; }
+.json-boolean { color: #a75216; }
+.json-null, .json-empty, .json-meta, .json-colon { color: var(--ink-3); }
+.json-error { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--bad); }
 
 /* 비교 */
 .cmp-toolbar { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }

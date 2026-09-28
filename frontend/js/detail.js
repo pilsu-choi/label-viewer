@@ -2,6 +2,7 @@ import { el, clear, mount, toast, isEditingTarget, icon, menuButton } from './ut
 import { api } from './api.js';
 import { navigate, setNavGuard } from './router.js';
 import { createImageViewer } from './imageViewer.js';
+import { createJsonViewer } from './jsonViewer.js';
 import { createGoldenEditor } from './goldenEditor.js';
 import { renderCompare } from './compare.js';
 import { buildReconModel, renderReconHTML, buildMarkdown, renderMarkdownToDom } from './reconstruct.js';
@@ -100,6 +101,7 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function loadImage() {
+    imgViewer && imgViewer.clearFocus();
     const pages = (doc.pages && doc.pages[state.view]) || 1;
     state.page = Math.min(Math.max(1, state.page), Math.max(1, pages));
     if (pageLabel) pageLabel.textContent = pages > 1 ? `${state.page} / ${pages}` : '';
@@ -111,9 +113,9 @@ export function renderDetail(root, bundleId, docId) {
 
   function onHoverBbox(bboxList) {
     if (!imgViewer) return;
-    if (!bboxList) { imgViewer.setBoxes([]); return; }
+    if (!bboxList) { imgViewer.clearFocus(); return; }
     const boxes = bboxList.filter((b) => (b.page || 1) === state.page).map((b) => ({ x: b.box[0], y: b.box[1], w: b.box[2], h: b.box[3] }));
-    imgViewer.setBoxes(boxes);
+    imgViewer.focusBoxes(boxes);
   }
 
   function refreshAfterDocUpdate(updated) {
@@ -316,27 +318,29 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function buildRawTab() {
-    const pre = el('pre', {}, '');
+    const viewerHost = el('div', { class: 'json-viewer' });
+    const jsonViewer = createJsonViewer(viewerHost);
     const sel = { golden: el('button', { class: 'active' }, 'Golden'), ao: el('button', {}, 'AO Extract'), harness: el('button', {}, 'Harness') };
     let current = 'golden';
     function load(kind) {
       current = kind;
       for (const k in sel) sel[k].classList.toggle('active', k === kind);
-      if (!doc.has[RAW_KIND[kind]]) { pre.textContent = '(파일 없음)'; return; }
-      pre.textContent = '불러오는 중…';
+      if (!doc.has[RAW_KIND[kind]]) { jsonViewer.show(JSON.stringify('(파일 없음)')); return; }
+      jsonViewer.show(JSON.stringify('불러오는 중…'));
       api.getRaw(bundleId, docId, RAW_KIND[kind]).then((text) => {
-        try { pre.textContent = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { pre.textContent = text; }
-      }).catch(() => { pre.textContent = '(파일 없음)'; });
+        if (kind !== current) return;
+        try { jsonViewer.show(JSON.stringify(JSON.parse(text), null, 2)); } catch (e) { jsonViewer.show(text); }
+      }).catch(() => { if (kind === current) jsonViewer.show(JSON.stringify('(파일 없음)')); });
     }
     sel.golden.addEventListener('click', () => load('golden'));
     sel.ao.addEventListener('click', () => load('ao'));
     sel.harness.addEventListener('click', () => load('harness'));
     const copyBtn = el('button', { class: 'btn btn-sm', onclick: () => {
-      navigator.clipboard && navigator.clipboard.writeText(pre.textContent).then(() => toast('복사했습니다.')).catch(() => toast('복사 실패', 'error'));
+      navigator.clipboard && navigator.clipboard.writeText(jsonViewer.getText()).then(() => toast('복사했습니다.')).catch(() => toast('복사 실패', 'error'));
     } }, '복사');
     mount(tabHosts.raw, el('div', { class: 'raw-json-panel' }, [
       el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'toggle-group' }, [sel.golden, sel.ao, sel.harness]), el('div', { class: 'grow' }), copyBtn]),
-      pre,
+      viewerHost,
     ]));
     load('golden');
   }
