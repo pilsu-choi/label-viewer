@@ -2,14 +2,14 @@
 okf_version: "0.2"
 type: dataset
 title: 실전형 dummy2 샘플 번들
-description: e2e 표본결과에서 문서 종류별 실제 이미지와 AO·Harness·정답 JSON 2건씩을 골라 로컬 검수용 번들로 만드는 규칙과 개인정보 취급을 기록한다.
-tags: [label-viewer, dummy-data, e2e, ao, harness, privacy]
+description: e2e 표본결과에서 문서 종류별 실제 이미지와 AO·Harness·정답 JSON 2건씩을 골라 AO UI bbox sidecar와 함께 로컬 검수용 번들로 만드는 규칙과 개인정보 취급을 기록한다.
+tags: [label-viewer, dummy-data, e2e, ao, harness, bbox, privacy]
 status: active
 ---
 
 날짜: 2026-09-28
-브랜치: `feat/realistic-dummy2`
-워크트리: `label_veiwer/.worktrees/realistic-dummy2`
+브랜치: `fix/bbox-hover`
+워크트리: `.worktrees/bbox-hover`
 
 ## 목적
 
@@ -17,7 +17,7 @@ status: active
 
 ## 샘플 구성
 
-소스는 `../e2e/표본결과/<문서 종류>/`다. 각 항목은 원본 이미지, 같은 stem의 `.aiocr.json`, `.harness.json`, `.answer.json`이 모두 존재하는 quartet이다. AO 자료는 Harness 요청을 위해 변환된 `.aiocr.adapted.json`이 아니라 원본 AO 응답 `.aiocr.json`을 쓴다. 아래 파일명은 원본 위치를 다시 찾을 수 있도록 기록한다.
+소스는 `../e2e/표본결과/<문서 종류>/`다. 각 항목은 원본 이미지, 같은 stem의 `.aiocr.json`, `.harness.json`, `.answer.json`이 모두 존재하는 quartet이다. AO 자료는 Harness 요청을 위해 변환된 `.aiocr.adapted.json`이 아니라 원본 AO 응답 `.aiocr.json`을 쓴다. 별도 AO UI run 디렉터리의 `.aiocr.ui.json`이 있는 항목은 함께 복사한다. UI sidecar는 셀 bbox를 제공하며 Golden/AO/Harness 비교값이나 점수에 관여하지 않는다. 아래 파일명은 원본 위치를 다시 찾을 수 있도록 기록한다.
 
 | 문서 종류 | 샘플 A | 샘플 B | 다양성 |
 |---|---|---|---|
@@ -37,13 +37,15 @@ status: active
 python3 scripts/make_dummy2.py --source-root ../e2e/표본결과 --out samples/dummy2
 ```
 
-생성 폴더에는 `original/`, `ao_extract/`, `harness/`, `golden/`가 있고 ZIP은 `samples/dummy2.zip`이다. 원본 내용은 수정하거나 재인코딩하지 않고 바이트 단위로 복사한다. `D2-<문서종류코드>-<순번>` 별칭을 사용하며 파일 확장자와 데이터 종류 접미사를 보존해 이미지와 JSON이 stem으로 묶인다. 원본의 상대 경로와 각 파일 SHA-256은 로컬의 `provenance.local.json`에만 기록하고 번들 ZIP에서는 제외한다.
+생성기는 `e2e/out/ao-ui-205-20260927-204626`을 기본 sidecar 위치로 탐색한다. 경로를 바꾸려면 `--ui-root <ao-ui-run-directory>`를 지정한다. sidecar를 제외하려면 빈 디렉터리를 `--ui-root`로 지정한다.
+
+생성 폴더에는 `original/`, `ao_extract/`, `harness/`, `golden/`와 sidecar가 있는 문서의 `ao_ui/`가 있고 ZIP은 `samples/dummy2.zip`이다. 원본 내용은 수정하거나 재인코딩하지 않고 바이트 단위로 복사한다. `D2-<문서종류코드>-<순번>` 별칭을 사용하며 파일 확장자와 데이터 종류 접미사를 보존해 이미지와 JSON이 stem으로 묶인다. 원본의 상대 경로와 각 파일 SHA-256은 로컬의 `provenance.local.json`에만 기록하고 번들 ZIP에서는 제외한다.
 
 E2E 표본에는 전처리 이미지가 없어 이 번들은 원본 이미지 보기만 제공한다.
 
 ## 검증
 
-- 7종류 × 2건 = 14문서, 이미지·AO·Harness·답안 56개 파일을 생성했다. 출력 파일의 SHA-256이 원본과 같고 ZIP에는 56개 파일만 들어 있으며 로컬 provenance는 빠져 있다.
+- 7종류 × 2건 = 14문서, 이미지·AO·Harness·답안 56개 파일과 사용 가능한 AO UI sidecar를 생성한다. 출력 파일의 SHA-256은 원본과 같고 로컬 provenance는 ZIP에서 빠진다.
 - 생성 ZIP을 앱의 업로드 처리에 넣어 14문서 모두 원본 이미지·AO·Harness·Golden이 짝지어지고 오류가 없음을 확인했다. AO 기준 비교 행 1,431개가 생성됐고 14문서 모두 양쪽 점수가 계산됐다.
 - 1920×1080 Chromium에서 실제 이미지, 14건 문서 레일과 `D2-REC-001`의 비교 행 272개를 확인했다. 페이지 오류는 없었다.
 - 실제 표본의 긴 비교 목록이 상세 화면 전체 높이를 늘리는 현상이 드러나, 상세 화면 높이를 뷰포트에 고정하고 비교 패널 안에서 스크롤되도록 CSS를 보정했다.
