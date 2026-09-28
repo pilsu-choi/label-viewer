@@ -190,6 +190,9 @@ const ICONS = {
   columns: [['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ['path', { d: 'M12 3v18' }]],
   image: [['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ['circle', { cx: 8.5, cy: 8.5, r: 1.5 }], ['path', { d: 'M21 15l-5-5L5 21' }]],
   'more-horizontal': [['circle', { cx: 5, cy: 12, r: 1 }], ['circle', { cx: 12, cy: 12, r: 1 }], ['circle', { cx: 19, cy: 12, r: 1 }]],
+  'chevrons-up-down': [['path', { d: 'M7 15l5 5 5-5' }], ['path', { d: 'M7 9l5-5 5 5' }]],
+  'chevrons-down-up': [['path', { d: 'M7 20l5-5 5 5' }], ['path', { d: 'M7 4l5 5 5-5' }]],
+  copy: [['rect', { x: 9, y: 9, width: 13, height: 13, rx: 2 }], ['path', { d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' }]],
 };
 export function icon(name) {
   const NS = 'http://www.w3.org/2000/svg';

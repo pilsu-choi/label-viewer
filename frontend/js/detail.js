@@ -325,21 +325,18 @@ export function renderDetail(root, bundleId, docId) {
     function load(kind) {
       current = kind;
       for (const k in sel) sel[k].classList.toggle('active', k === kind);
-      if (!doc.has[RAW_KIND[kind]]) { jsonViewer.show(JSON.stringify('(파일 없음)')); return; }
-      jsonViewer.show(JSON.stringify('불러오는 중…'));
+      if (!doc.has[RAW_KIND[kind]]) { jsonViewer.showMessage('파일 없음', '이 소스에는 원본 JSON이 없습니다.', 'folder'); return; }
+      jsonViewer.showMessage('불러오는 중…');
       api.getRaw(bundleId, docId, RAW_KIND[kind]).then((text) => {
         if (kind !== current) return;
-        try { jsonViewer.show(JSON.stringify(JSON.parse(text), null, 2)); } catch (e) { jsonViewer.show(text); }
-      }).catch(() => { if (kind === current) jsonViewer.show(JSON.stringify('(파일 없음)')); });
+        jsonViewer.show(text);
+      }).catch(() => { if (kind === current) jsonViewer.showMessage('파일 없음', '이 소스에는 원본 JSON이 없습니다.', 'folder'); });
     }
     sel.golden.addEventListener('click', () => load('golden'));
     sel.ao.addEventListener('click', () => load('ao'));
     sel.harness.addEventListener('click', () => load('harness'));
-    const copyBtn = el('button', { class: 'btn sm', onclick: () => {
-      navigator.clipboard && navigator.clipboard.writeText(jsonViewer.getText()).then(() => toast('복사했습니다.')).catch(() => toast('복사 실패', 'error'));
-    } }, '복사');
     mount(tabHosts.raw, el('div', { class: 'raw-json-panel' }, [
-      el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'seg' }, [sel.golden, sel.ao, sel.harness]), el('div', { class: 'grow' }), copyBtn]),
+      el('div', { class: 'raw-json-toolbar' }, [el('div', { class: 'seg' }, [sel.golden, sel.ao, sel.harness])]),
       viewerHost,
     ]));
     load('golden');

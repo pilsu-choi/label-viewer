@@ -37,7 +37,7 @@
   --warn: #b26a00; --warn-soft: #fdf0db;
   --extra: #6a45c6; --extra-soft: #efe9fb;
   --type: #866700; --type-soft: #f6eecb;
-  --json-key: #7955a1; --json-str: #167548; --json-num: #195caa; --json-bool: #a75216;
+  --syn-key: #6d4fc2; --syn-string: #1a7f4b; --syn-number: #1f5fbf; --syn-bool: #b3541e; --syn-null: var(--ink-3); --syn-punct: var(--ink-3);
   --font: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --font-code: ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .04);
@@ -55,7 +55,7 @@
     --ok: #45c088; --ok-soft: #13291e; --bad: #f36b61; --bad-soft: #351a18;
     --warn: #e6a545; --warn-soft: #33250f; --extra: #b69bf2; --extra-soft: #261d3a;
     --type: #d9c24f; --type-soft: #2f2a10;
-    --json-key: #c3a4e8; --json-str: #5fd0a0; --json-num: #7db8ec; --json-bool: #f0ad70;
+    --syn-key: #c4a7ff; --syn-string: #7ee2a8; --syn-number: #7cb7ff; --syn-bool: #ffb378; --syn-null: var(--ink-3); --syn-punct: var(--ink-3);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
     --shadow-pop: 0 14px 36px -6px rgba(0, 0, 0, .6);
     color-scheme: dark;
@@ -71,7 +71,7 @@
   --ok: #45c088; --ok-soft: #13291e; --bad: #f36b61; --bad-soft: #351a18;
   --warn: #e6a545; --warn-soft: #33250f; --extra: #b69bf2; --extra-soft: #261d3a;
   --type: #d9c24f; --type-soft: #2f2a10;
-  --json-key: #c3a4e8; --json-str: #5fd0a0; --json-num: #7db8ec; --json-bool: #f0ad70;
+  --syn-key: #c4a7ff; --syn-string: #7ee2a8; --syn-number: #7cb7ff; --syn-bool: #ffb378; --syn-null: var(--ink-3); --syn-punct: var(--ink-3);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
   --shadow-pop: 0 14px 36px -6px rgba(0, 0, 0, .6);
   color-scheme: dark;
@@ -511,27 +511,37 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .gs-table-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 
 .advanced-json textarea { width: 100%; min-height: 300px; }
-.json-error { color: var(--bad); font-size: var(--fs-sm); font-weight: 600; }
 .raw-json-panel { display: flex; flex-direction: column; gap: var(--sp-3); height: 100%; }
 .raw-json-toolbar { display: flex; align-items: center; gap: var(--sp-2); }
-.json-viewer { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: var(--sp-2); }
-.json-viewer-tools { display: flex; align-items: center; gap: var(--sp-2); }
-.json-search { width: min(320px, 70%); height: var(--h-sm); padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: var(--fs-sm); }
-.json-count { color: var(--ink-3); font-size: var(--fs-xs); }
-.json-tree { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); font: var(--fs-sm)/1.65 var(--font-code); }
-.json-node { min-width: max-content; }
-.json-summary { display: flex; align-items: baseline; gap: 4px; width: fit-content; cursor: pointer; list-style: none; }
-.json-summary::-webkit-details-marker { display: none; }
-.json-summary::before { width: 10px; color: var(--ink-3); content: '▸'; }
-.json-node[open] > .json-summary::before { content: '▾'; }
-.json-node > .json-primitive { padding-left: 14px; }
-.json-children { padding-left: 18px; }
-.json-key { color: var(--json-key); }
-.json-string { color: var(--json-str); white-space: pre-wrap; }
-.json-number { color: var(--json-num); }
-.json-boolean { color: var(--json-bool); }
-.json-null, .json-empty, .json-meta, .json-colon { color: var(--ink-3); }
-.json-error { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--bad); }
+
+/* JSON 뷰어 — 테마 인식 트리 */
+.json-viewer { display: flex; flex: 1; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.json-search-wrap { position: relative; flex: none; width: min(320px, 50%); }
+.json-search-wrap .ic { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
+.json-search { width: 100%; height: var(--h-md); padding: 0 var(--sp-2) 0 28px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: var(--fs-sm); }
+.json-count { flex: none; color: var(--ink-3); font-size: var(--fs-xs); white-space: nowrap; }
+.json-tree { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-2) 0; background: var(--surface); font: var(--fs-sm)/20px var(--font-code); }
+.json-row { display: flex; align-items: baseline; gap: 4px; height: 20px; padding-right: var(--sp-3); white-space: nowrap; cursor: pointer; }
+.json-row:hover { background: var(--surface-2); }
+.json-row.selected { background: var(--accent-soft); }
+.json-toggle { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--ink-3); }
+.json-toggle .ic { width: 12px; height: 12px; transition: transform .12s; }
+.json-toggle.open .ic { transform: rotate(90deg); }
+.json-children { border-left: 1px solid var(--line); margin-left: 8px; }
+.json-row:hover + .json-children, .json-children:hover { border-left-color: var(--line-strong); }
+.json-key { color: var(--syn-key); }
+.json-index { color: var(--ink-3); }
+.json-punct { color: var(--syn-punct); }
+.json-string { color: var(--syn-string); max-width: 640px; overflow: hidden; text-overflow: ellipsis; }
+.json-number { color: var(--syn-number); }
+.json-boolean { color: var(--syn-bool); }
+.json-null { color: var(--syn-null); }
+.json-pill { flex: none; padding: 0 5px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-3); font-size: var(--fs-xs); }
+.json-preview { overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); }
+.json-hit { border-radius: 2px; background: var(--hl-soft); color: var(--ink); }
+.json-raw { margin: var(--sp-2) var(--sp-3) 0; padding: var(--sp-3); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-xs)/1.6 var(--font-code); color: var(--ink-2); max-height: 240px; overflow: auto; }
+.json-status { display: flex; flex: none; align-items: center; gap: var(--sp-2); height: 28px; padding: 0 var(--sp-3); border-top: 1px solid var(--line); background: var(--surface-2); }
+.json-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font: var(--fs-xs)/1 var(--font-code); }
 
 /* 비교 */
 .cmp-toolbar { margin-bottom: var(--sp-3); }
