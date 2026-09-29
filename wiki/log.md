@@ -15,6 +15,7 @@ status: active
 
 ### Update
 
+- [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): Golden 초안 수정 반영 AWS 재배포 결과 추가.
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `c0a9f11` AWS 재배포 결과 추가.
 - [Label Viewer 양식 불일치 표시와 문서 분류 판정 검토](2026-09-29-doc-type-mismatch.md): 검수자 문서 종류 확정·7종 양식 템플릿, 분류 채점과 오분류 필드 집계 제외 구현 내용 추가.
 - [Label Viewer 양식 불일치 표시·문서 종류 확정·분류 채점](2026-09-29-doc-type-mismatch.md): 상세 화면이 열리지 않던 배지 배열 렌더링 오류 수정과 브라우저 확인 결과 추가.
@@ -24,6 +25,7 @@ status: active
 
 ### Creation
 
+- [실행 응답 형식 하네스·AO JSON Golden 초안 수정](2026-09-29-run-result-golden-draft.md): 최상위 `result` 형식 정규화로 빈 초안 문제 해결.
 - [Label Viewer 창 크기 반응형 레이아웃](2026-09-29-responsive-layout.md): 재구성 보기·이미지 분할 비율화, 상단바·도구 모음 줄바꿈, 가로 스크롤 제거, 비교 표 배지 줄바꿈 기록.
 - [Label Viewer 양식 불일치 표시와 문서 분류 판정 검토](2026-09-29-doc-type-mismatch.md): Harness 재분류 기반 양식 불일치 배지, AO 기반 Golden 생성 경고, AO JSON만으로 분류 판정 가능성 검증(e2e 205건)과 후속 제안 기록.
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): docker-compose.yml과 deploy/aws 스크립트 추가 기록.
