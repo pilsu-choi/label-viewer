@@ -19,6 +19,7 @@ status: active
 - [2026-09-28 상세 검수 상호작용 개선](2026-09-28-review-inspection-interactions.md)
 - [2026-09-28 AO UI response 정규화와 Raw JSON 원문 선택](2026-09-28-ao-upload-classification.md)
 - [2026-09-29 Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md)
+- [2026-09-29 Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md)
 - [2026-09-29 실행 응답 형식 하네스·AO JSON Golden 초안 수정](2026-09-29-run-result-golden-draft.md)
 - [2026-09-29 Label Viewer 비교 탭 사용성 개선](2026-09-29-compare-tab-usability.md)
 - [2026-09-29 Label Viewer 편집 탭 버그 수정·사용성 개선](2026-09-29-edit-tab-usability.md)
