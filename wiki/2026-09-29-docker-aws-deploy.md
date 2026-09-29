@@ -39,6 +39,7 @@ status: active
 - 로컬 `docker compose up -d --build --wait`: 이미지 195MB, `healthy`, `/api/health` `{"ok":true}`, `/` 200.
 - AWS 배포(2026-09-29): `LABEL_VIEWER_BIND=0.0.0.0`으로 배포, 컨테이너 `healthy`, 게시 `0.0.0.0:8765->8765`. 서버 안 `curl 127.0.0.1:8765/api/health` 정상.
 - AWS 재배포(2026-09-29, dev `c0a9f11`): 양식 불일치·문서 종류 확정·분류 채점·비교 탭 문서 유형 행·반응형 레이아웃 반영. `deploy.sh`로 이미지 68MB 전송, 컨테이너 `healthy`. 외부에서 `/api/health` 정상, 정적 파일 `Cache-Control: no-cache`와 새 JS·CSS 확인.
+- AWS 재배포(2026-09-29, dev `816753c`): 실행 응답 형식 Golden 초안 수정 반영. 컨테이너 `healthy`, `out_label_viewer.zip` 업로드 후 하네스 초안 생성 확인(진료비영수증, fields 5·groups 3·tables 1), 검증 번들 삭제.
 - 외부 접속: 배포 직후 외부 요청은 타임아웃이었다. 서버에 firewalld가 없으므로 보안그룹 인바운드 TCP 8765를 열어야 한다.
 
 ## 외부 노출 주의
