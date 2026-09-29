@@ -113,7 +113,26 @@ export function createGoldenEditor(host, opts) {
   function updateSummary() {
     if (!summaryEl) return;
     const n = (doc.compare || []).filter(isMismatch).length;
-    summaryEl.textContent = `불일치 ${n} · 빈 값 ${countEmptyWithSource()}`;
+    const k = ghostEntries().length;
+    summaryEl.textContent = `불일치 ${n} · 빈 값 ${countEmptyWithSource()}${k ? ` · Golden에 없음 ${k}` : ''}`;
+  }
+
+  // 현재 golden 에 그려지는 경로 집합 (경로 형식은 각 렌더러와 동일)
+  function renderedPaths() {
+    const d0 = golden && golden.documents && golden.documents[0];
+    const s = new Set();
+    if (!d0) return s;
+    (d0.extracted_fields || []).forEach((c) => s.add(`documents[0].fields[${c.key}]`));
+    (d0.extracted_groups || []).forEach((g) => (g.fields || []).forEach((c) => s.add(`documents[0].groups[${g.key}].fields[${c.key}]`)));
+    (d0.extracted_tables || []).forEach((t) => (t.rows || []).forEach((row, ri) => row.forEach((c) => c && s.add(`documents[0].tables[${t.key}].rows[${ri}].cells[${c.key}]`))));
+    return s;
+  }
+
+  // compare 에는 있고 소스 값도 있는데 golden 에는 없는 위치(문서 0). area/container 로 거를 수 있다.
+  function ghostEntries(area, container) {
+    const shown = renderedPaths();
+    return (doc.compare || []).filter((c) => c.doc === 0 && !shown.has(c.path) && hasSourceValue(c)
+      && (!area || c.area === area) && (container === undefined || c.container === container));
   }
 
   function doSave() {
@@ -198,7 +217,7 @@ export function createGoldenEditor(host, opts) {
   // 접힌 그룹 안에 있으면 펼치고, 이동한 칸은 잠깐 flash 로 강조하며 bbox 도 함께 표시한다.
   function focusMismatch(dir) {
     if (!doc.golden || golden == null) { toast('불일치 항목이 없습니다.'); return; }
-    const all = () => Array.from(host.querySelectorAll('.field-row[data-path], .gs-table td[data-path]'));
+    const all = () => Array.from(host.querySelectorAll('.field-row[data-path], .gs-table td[data-path], .ghost-cell[data-path]'));
     const targets = all().filter((n) => isMismatch(cmap.get(n.dataset.path)));
     if (!targets.length) { toast('불일치 항목이 없습니다.'); return; }
     mismatchCursor = mismatchCursor < 0 ? (dir > 0 ? 0 : targets.length - 1) : (mismatchCursor + dir + targets.length) % targets.length;
@@ -311,6 +330,41 @@ export function createGoldenEditor(host, opts) {
     return el('div', { class: `fr-${kind} ${kindState === 'bad' ? 'is-bad' : ''}`.trim(), ...tipHandlers(path) }, content);
   }
 
+  // 표 셀(td) 입력을 찾는 refocus 함수
+  const tdInput = (path) => (h) => {
+    const td = Array.from(h.querySelectorAll('.gs-table td[data-path]')).find((x) => x.dataset.path === path);
+    return td && td.querySelector('input');
+  };
+
+  // golden 에 없는 위치: 라벨 + "Golden에 없음" 배지 + AO/Harness 채택 칩(채택하면 위치를 만든다)
+  function ghostRow(entry) {
+    const path = entry.path;
+    return el('div', { class: 'field-row ghost', tabindex: '0', dataset: { path } }, [
+      el('span', { class: 'fr-label' }, entry.key),
+      el('div', { class: 'fr-value', ...tipHandlers(path) }, el('span', { class: 'badge badge-bad' }, 'Golden에 없음')),
+      el('div', { class: 'fr-compare' }, [compareCell('ao', 'AO', entry, path), compareCell('harness', 'Harness', entry, path)]),
+      el('span', { class: 'fr-dtype' }), el('span', { class: 'fr-del' }),
+    ]);
+  }
+
+  // 필드/그룹 그리드(헤더 + 실제 행 + ghost 행)
+  function fieldsGrid(rows, ghosts) {
+    ghosts.forEach((e) => rows.appendChild(ghostRow(e)));
+    return el('div', { class: 'gs-grid-wrap' }, [fieldsGridHead(), rows]);
+  }
+
+  // 표에서 없는 셀 목록: "행 N · key" + AO/Harness 칩
+  function ghostStrip(ghosts) {
+    return el('div', { class: 'table-ghosts' }, ghosts.map((e) => el('div', { class: 'table-adopt-bar ghost-cell', dataset: { path: e.path } }, [
+      el('span', { class: 'adopt-label' }, `행 ${Number(e.row) + 1} · ${e.key}`),
+      el('span', { class: 'badge badge-bad' }, 'Golden에 없음'),
+      compareCell('ao', 'AO', e, e.path, tdInput(e.path)),
+      compareCell('harness', 'Harness', e, e.path, tdInput(e.path)),
+    ])));
+  }
+
+  const mismatchBadge = (n) => (n ? el('span', { class: 'badge badge-bad', title: `불일치 ${n}건` }, `불일치 ${n}`) : null);
+
   function cellRow(cell, path, onDelete) {
     if (!cell.dtype) cell.dtype = 'string';
     const entry = cmap.get(path);
@@ -372,8 +426,9 @@ export function createGoldenEditor(host, opts) {
         rerenderAt(`.section-fields .field-row:nth-child(${idx + 1}) .fr-label`, `.section-fields .field-row:nth-child(${idx}) .fr-label`);
       }));
     });
-    const body = d0.extracted_fields.length ? el('div', { class: 'gs-grid-wrap' }, [fieldsGridHead(), rows]) : null;
-    return sectionShell('필드', d0.extracted_fields.length, '필드 추가', addFieldTop, body, 'section-fields');
+    const ghosts = ghostEntries('field');
+    const count = d0.extracted_fields.length + ghosts.length;
+    return sectionShell('필드', count, '필드 추가', addFieldTop, count ? fieldsGrid(rows, ghosts) : null, 'section-fields');
   }
 
   function renderGroupsSection(d0) {
@@ -381,7 +436,8 @@ export function createGoldenEditor(host, opts) {
     d0.extracted_groups.forEach((g, gi) => {
       if (!g.fields) g.fields = [];
       const collapsed = collapsedGroups.has(gi);
-      const mismatchCount = g.fields.reduce((n, cell) => n + (isMismatch(cmap.get(`documents[0].groups[${g.key}].fields[${cell.key}]`)) ? 1 : 0), 0);
+      const ghosts = ghostEntries('group', g.key);
+      const mismatchCount = ghosts.length + g.fields.reduce((n, cell) => n + (isMismatch(cmap.get(`documents[0].groups[${g.key}].fields[${cell.key}]`)) ? 1 : 0), 0);
       const rows = el('div', { class: 'gs-grid-body' });
       g.fields.forEach((cell, fi) => {
         rows.appendChild(cellRow(cell, `documents[0].groups[${g.key}].fields[${cell.key}]`, () => {
@@ -389,7 +445,7 @@ export function createGoldenEditor(host, opts) {
           rerenderAt(`.group-block[data-group-index="${gi}"] .field-row:nth-child(${fi + 1}) .fr-label`, `.group-block[data-group-index="${gi}"] .field-row:nth-child(${fi}) .fr-label`);
         }));
       });
-      const grid = g.fields.length ? el('div', { class: 'gs-grid-wrap' }, [fieldsGridHead(), rows]) : el('div', { class: 'section-empty sm' }, '필드가 없습니다');
+      const grid = g.fields.length || ghosts.length ? fieldsGrid(rows, ghosts) : el('div', { class: 'section-empty sm' }, '필드가 없습니다');
       const fieldsHost = el('div', { class: `group-fields ${collapsed ? 'collapsed' : ''}` }, [
         grid,
         el('button', { class: 'btn ghost sm', onclick: () => {
@@ -402,17 +458,29 @@ export function createGoldenEditor(host, opts) {
           el('button', { class: 'chev', onclick: () => { collapsed ? collapsedGroups.delete(gi) : collapsedGroups.add(gi); rerenderAt(); } }, icon(collapsed ? 'chevron-right' : 'chevron-down')),
           keyInput(g.key, '그룹 이름', (v) => { g.key = v; markDirty(); }),
           el('span', { class: 'group-count' }, String(g.fields.length)),
-          mismatchCount ? el('span', { class: 'badge badge-bad', title: `불일치 ${mismatchCount}건` }, `불일치 ${mismatchCount}`) : null,
+          mismatchBadge(mismatchCount),
           el('button', { class: 'field-row-del', title: '그룹 삭제', onclick: () => { d0.extracted_groups.splice(gi, 1); markDirty(); rerenderAt(); } }, icon('x')),
         ]),
         fieldsHost,
+      ]));
+    });
+    // golden 에 그룹 자체가 없는 경우: ghost 그룹 블록
+    const known = new Set(d0.extracted_groups.map((g) => g.key));
+    const missing = ghostEntries('group').filter((e) => !known.has(e.container));
+    [...new Set(missing.map((e) => e.container))].forEach((name) => {
+      const list = missing.filter((e) => e.container === name);
+      body.appendChild(el('div', { class: 'group-block ghost' }, [
+        el('div', { class: 'group-head' }, [
+          el('span', { class: 'ghost-name' }, name), el('span', { class: 'badge badge-bad' }, 'Golden에 없음'), el('div', { class: 'grow' }), mismatchBadge(list.length),
+        ]),
+        el('div', { class: 'group-fields' }, fieldsGrid(el('div', { class: 'gs-grid-body' }), list)),
       ]));
     });
     const addGroup = () => {
       d0.extracted_groups.push({ key: '새 그룹', fields: [] }); markDirty();
       rerenderAt('.section-groups .group-block:last-child .group-head input[type="text"]');
     };
-    return sectionShell('그룹', d0.extracted_groups.length, '그룹 추가', addGroup, body, 'section-groups');
+    return sectionShell('그룹', d0.extracted_groups.length + new Set(missing.map((e) => e.container)).size, '그룹 추가', addGroup, body, 'section-groups');
   }
 
   function renderTablesSection(d0) {
@@ -425,17 +493,15 @@ export function createGoldenEditor(host, opts) {
       function showAdoptBar(ri, header, path) {
         const entry = cmap.get(path);
         if (!entry) { adoptBar.style.display = 'none'; return; }
-        const refocus = (h) => {
-          const td = Array.from(h.querySelectorAll('.gs-table td[data-path]')).find((x) => x.dataset.path === path);
-          return td && td.querySelector('input');
-        };
+        const refocus = tdInput(path);
         clear(adoptBar);
         adoptBar.appendChild(el('span', { class: 'adopt-label' }, `행 ${ri + 1} · ${header}`));
         adoptBar.appendChild(compareCell('ao', 'AO', entry, path, refocus));
         adoptBar.appendChild(compareCell('harness', 'Harness', entry, path, refocus));
         adoptBar.style.display = 'flex';
       }
-      let mismatchCount = 0;
+      const ghosts = ghostEntries('table', t.key);
+      let mismatchCount = ghosts.length;
       const headRow = el('tr', { class: 'rowhandle-row' }, [
         el('th', { class: 'rowhandle' }, '#'),
         ...t.headers.map((h, ci) => el('th', {}, el('div', { class: 'gs-col-head' }, [
@@ -469,10 +535,11 @@ export function createGoldenEditor(host, opts) {
       body.appendChild(el('div', { class: 'table-block' }, [
         el('div', { class: 'table-head-row' }, [
           el('input', { type: 'text', value: t.key, oninput: (e) => { t.key = e.target.value; markDirty(); } }),
-          mismatchCount ? el('span', { class: 'badge badge-bad', title: `불일치 ${mismatchCount}건` }, `불일치 ${mismatchCount}`) : null,
+          mismatchBadge(mismatchCount),
           el('button', { class: 'field-row-del', title: '표 삭제', onclick: () => { d0.extracted_tables.splice(ti, 1); markDirty(); rerenderAt(); } }, icon('x')),
         ]),
         adoptBar,
+        ghosts.length ? ghostStrip(ghosts) : null,
         el('div', { class: 'gs-table-wrap' }, el('table', { class: 'gs-table', dataset: { tableIndex: ti } }, [el('thead', {}, headRow), tbody])),
         el('div', { class: 'gs-table-actions' }, [
           el('button', { class: 'btn ghost sm', onclick: () => {
@@ -489,11 +556,21 @@ export function createGoldenEditor(host, opts) {
         ]),
       ]));
     });
+    // golden 에 표 자체가 없는 경우: ghost 표 블록
+    const knownT = new Set(d0.extracted_tables.map((t) => t.key));
+    const missingT = ghostEntries('table').filter((e) => !knownT.has(e.container));
+    [...new Set(missingT.map((e) => e.container))].forEach((name) => {
+      const list = missingT.filter((e) => e.container === name);
+      body.appendChild(el('div', { class: 'table-block ghost' }, [
+        el('div', { class: 'table-head-row' }, [el('span', { class: 'ghost-name' }, name), el('span', { class: 'badge badge-bad' }, 'Golden에 없음'), mismatchBadge(list.length)]),
+        ghostStrip(list),
+      ]));
+    });
     const addTable = () => {
       d0.extracted_tables.push({ key: '새 표', headers: ['열1'], rows: [] }); markDirty();
       rerenderAt('.section-tables .table-block:last-child .table-head-row input[type="text"]');
     };
-    return sectionShell('표', d0.extracted_tables.length, '표 추가', addTable, body, 'section-tables');
+    return sectionShell('표', d0.extracted_tables.length + new Set(missingT.map((e) => e.container)).size, '표 추가', addTable, body, 'section-tables');
   }
 
   function renderAdvanced() {
