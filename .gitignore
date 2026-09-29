@@ -7,3 +7,4 @@ storage/
 *.egg-info/
 deploy/aws/.env.aws
 deploy/aws/.tunnel.pid
+dist/

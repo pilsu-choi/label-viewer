@@ -12,3 +12,4 @@ wiki/
 deploy/
 .env*
 docker-compose.yml
+dist/

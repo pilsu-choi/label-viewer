@@ -25,6 +25,7 @@ status: active
 
 ### Creation
 
+- [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): 독립 반입 번들(이미지 tar·kustomize·install/remove) 추가와 kind 검증 기록.
 - [실행 응답 형식 하네스·AO JSON Golden 초안 수정](2026-09-29-run-result-golden-draft.md): 최상위 `result` 형식 정규화로 빈 초안 문제 해결.
 - [Label Viewer 창 크기 반응형 레이아웃](2026-09-29-responsive-layout.md): 재구성 보기·이미지 분할 비율화, 상단바·도구 모음 줄바꿈, 가로 스크롤 제거, 비교 표 배지 줄바꿈 기록.
 - [Label Viewer 양식 불일치 표시와 문서 분류 판정 검토](2026-09-29-doc-type-mismatch.md): Harness 재분류 기반 양식 불일치 배지, AO 기반 Golden 생성 경고, AO JSON만으로 분류 판정 가능성 검증(e2e 205건)과 후속 제안 기록.

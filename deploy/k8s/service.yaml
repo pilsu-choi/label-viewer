@@ -5,10 +5,11 @@ metadata:
   labels:
     app: label-viewer
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: label-viewer
   ports:
     - name: http
-      port: 80
-      targetPort: 8765
+      port: 8765
+      targetPort: http
+      nodePort: 30920

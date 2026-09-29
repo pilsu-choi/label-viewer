@@ -5,3 +5,8 @@ resources:
   - pvc.yaml
   - deployment.yaml
   - service.yaml
+
+# build-bundle.sh 가 번들 사본의 newTag 를 이미지 태그로 바꾼다
+images:
+  - name: label-viewer
+    newTag: latest
