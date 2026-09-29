@@ -334,6 +334,7 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 
 .filter-row { display: flex; align-items: center; gap: 2px; margin-bottom: var(--sp-4); flex-wrap: wrap; }
 .view-seg { margin-left: auto; }
+.doctype-filter { width: auto; max-width: 240px; height: 30px; margin-left: var(--sp-3); font-size: var(--fs-sm); }
 .view-seg button { padding: 0 8px; }
 
 .doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--sp-3); }
@@ -603,7 +604,8 @@ select.fr-dtype {
 .table-head-row { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .table-head-row input { flex: 1; height: var(--h-sm); font-size: var(--fs-md); font-weight: 600; }
 /* 셀 채택 바: 표 블록당 하나, 포커스된 셀의 AO/Harness 칩을 보여준다(.gs-chip 재사용) */
-.table-adopt-bar { align-items: center; gap: var(--sp-3); height: 32px; padding: 0 var(--sp-2); margin-bottom: var(--sp-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); font-size: var(--fs-sm); }
+.table-adopt-bar { display: flex; align-items: center; gap: var(--sp-3); height: 32px; padding: 0 var(--sp-2); margin-bottom: var(--sp-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); font-size: var(--fs-sm); }
+.table-adopt-bar .hint { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .table-adopt-bar .adopt-label { flex: none; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 .table-adopt-bar .fr-ao, .table-adopt-bar .fr-harness { flex: 1 1 0; min-width: 0; }
 .table-adopt-bar .gs-chip { flex-direction: row; align-items: baseline; gap: 6px; height: auto; }
@@ -625,6 +627,7 @@ select.fr-dtype {
 .gs-table tbody tr td.warn { box-shadow: inset 0 0 0 1px var(--warn); }
 .gs-table tbody tr td.warn { background: var(--warn-soft); }
 .gs-table tbody tr td.weak { background: color-mix(in srgb, var(--line-strong) 35%, transparent); }
+.gs-table tbody tr td.sel { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 .gs-table tbody tr td.flash { background: var(--hl-soft); transition: background .6s; }
 .gs-col-head { position: relative; display: flex; align-items: center; }
 .gs-col-head:hover input[type="text"], .gs-col-head:focus-within input[type="text"] { padding-right: 23px; }
