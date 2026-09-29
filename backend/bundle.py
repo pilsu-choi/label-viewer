@@ -40,7 +40,7 @@ _SUFFIX_KEYS: dict[str, tuple[str, ...]] = {
 _STRIP_EXT = IMAGE_EXTS | {".json"}
 _STRIP_SUFFIX = {".answer", ".golden", ".harness", ".aiocr", ".ao", ".ui", ".draft"}
 _PAGE_RE = re.compile(r"\.p\d+$", re.I)
-_ID_RE = re.compile(r"^[A-Za-z0-9_\-.~]+$")
+_ID_RE = re.compile(r"^[^/\\\x00-\x1f]+$")  # 파일명에서 온 ID(한글·공백·괄호 포함). 경로 구분자·제어문자만 막는다
 
 
 class ApiError(Exception):
