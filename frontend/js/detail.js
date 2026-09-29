@@ -392,7 +392,7 @@ export function renderDetail(root, bundleId, docId) {
     dragCleanup = () => { cleanupPanelDrags(); window.removeEventListener('mousemove', onRailMove); window.removeEventListener('mouseup', onRailUp); };
     documentRail = createDocumentRail(railHost, bundle?.docs || [], docId,
       (nextId) => nextId !== docId && navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(nextId)}`),
-      { onToggleCollapse: toggleRail });
+      { onToggleCollapse: toggleRail, bundleId });
     workspace = el('div', { class: 'detail-main' }, [railHost, railResizer, body]);
 
     const screen = el('div', { class: 'detail-screen' }, [
