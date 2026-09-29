@@ -90,3 +90,6 @@ status: active
 
 ### Update
 - [편집 탭 불일치 강조와 Golden에 없는 키 ghost 행](2026-09-29-editor-mismatch-viz.md): 표 셀 강조가 절반만 칠해지던 문제 수정 내용 추가.
+
+### Creation
+- [문서 유형 필터와 편집 탭 표 다중 셀 일괄 입력](2026-09-29-doctype-filter-multicell.md): 목록 문서 유형 select 필터, 표 드래그·Shift+클릭 범위 선택 후 같은 값 일괄 입력, 채택 바 상시 표시로 표 밀림 제거.

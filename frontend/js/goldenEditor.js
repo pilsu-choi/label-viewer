@@ -1,4 +1,4 @@
-import { el, clear, debounce, toast, statusLabel, icon, menuButton, josa, isMismatch, hasSourceValue, entryState } from './util.js';
+import { el, clear, mount, debounce, toast, statusLabel, icon, menuButton, josa, isMismatch, hasSourceValue, entryState } from './util.js';
 import { api } from './api.js';
 import { cellDisplay } from './reconstruct.js';
 
@@ -489,17 +489,57 @@ export function createGoldenEditor(host, opts) {
       if (!t.headers) t.headers = [];
       if (!t.rows) t.rows = [];
       // 셀 채택 바: 셀에 포커스가 오면 그 셀의 compare 항목(AO/Harness 칩)을 보여준다. 표마다 하나.
-      const adoptBar = el('div', { class: 'table-adopt-bar', style: 'display:none' });
+      // 표가 밀리지 않도록 바는 항상 자리를 차지하고, 내용만 기본 안내 ↔ 셀 비교 ↔ 다중 선택 안내로 바꾼다.
+      const adoptBar = el('div', { class: 'table-adopt-bar' });
+      const idleBar = () => mount(adoptBar, el('span', { class: 'hint' }, '칸을 선택하면 AO/Harness 값이 보입니다 · 드래그나 Shift+클릭으로 여러 칸을 골라 같은 값 입력'));
+      // 드래그/Shift+클릭으로 고른 직사각형 셀 범위. 선택 칸 중 하나에 입력하면 선택 칸 모두 같은 값이 된다.
+      let anchor = null, sel = null;
+      const inSel = (ri, ci) => sel && ri >= Math.min(sel.r0, sel.r1) && ri <= Math.max(sel.r0, sel.r1) && ci >= Math.min(sel.c0, sel.c1) && ci <= Math.max(sel.c0, sel.c1);
+      const selCount = () => (sel ? (Math.abs(sel.r1 - sel.r0) + 1) * (Math.abs(sel.c1 - sel.c0) + 1) : 0);
+      function setSel(ri, ci) {
+        sel = ri == null ? null : { r0: anchor.ri, c0: anchor.ci, r1: ri, c1: ci };
+        tbody.querySelectorAll('td[data-ci]').forEach((td) => td.classList.toggle('sel', selCount() > 1 && inSel(+td.dataset.ri, +td.dataset.ci)));
+      }
+      // 선택 확정(드래그 종료·Shift+클릭) 시 안내 바를 띄우고 기준 칸에 포커스. 드래그 중에 띄우면 표가 밀려 선택이 어긋난다.
+      function commitSel() {
+        if (selCount() < 2) return;
+        mount(adoptBar, [el('span', { class: 'adopt-label' }, `${selCount()}칸 선택`), el('span', { class: 'hint' }, '입력하면 선택한 칸이 모두 같은 값으로 바뀝니다 · Esc 해제')]);
+        const inp = tdInput(cellPath(anchor.ri, anchor.ci))(host);
+        inp.focus(); inp.select();
+      }
+      function clearSel() { if (selCount() < 2) return; setSel(null); idleBar(); }
+      const cellMouse = (ri, ci) => ({
+        onmousedown: (e) => {
+          if (e.button !== 0) return;
+          if (e.shiftKey && anchor) { e.preventDefault(); setSel(ri, ci); commitSel(); return; }
+          clearSel();
+          anchor = { ri, ci };
+          document.addEventListener('mouseup', commitSel, { once: true });
+        },
+        onmouseenter: (e) => {
+          if (!(e.buttons & 1) || !anchor || (anchor.ri === ri && anchor.ci === ci && !sel)) return;
+          window.getSelection().removeAllRanges();
+          setSel(ri, ci);
+        },
+      });
+      const cellPath = (ri, ci) => `documents[0].tables[${t.key}].rows[${ri}].cells[${t.rows[ri][ci].key}]`;
+      function fillSel(value) {
+        tbody.querySelectorAll('td.sel').forEach((td) => {
+          t.rows[+td.dataset.ri][+td.dataset.ci].value = value;
+          td.querySelector('input').value = value;
+        });
+      }
       function showAdoptBar(ri, header, path) {
+        if (selCount() > 1) return;
         const entry = cmap.get(path);
-        if (!entry) { adoptBar.style.display = 'none'; return; }
+        if (!entry) { idleBar(); return; }
         const refocus = tdInput(path);
         clear(adoptBar);
         adoptBar.appendChild(el('span', { class: 'adopt-label' }, `행 ${ri + 1} · ${header}`));
         adoptBar.appendChild(compareCell('ao', 'AO', entry, path, refocus));
         adoptBar.appendChild(compareCell('harness', 'Harness', entry, path, refocus));
-        adoptBar.style.display = 'flex';
       }
+      idleBar();
       const ghosts = ghostEntries('table', t.key);
       let mismatchCount = ghosts.length;
       const headRow = el('tr', { class: 'rowhandle-row' }, [
@@ -526,9 +566,10 @@ export function createGoldenEditor(host, opts) {
           const path = `documents[0].tables[${t.key}].rows[${ri}].cells[${cell.key}]`;
           const cls = entryState(cmap.get(path), cell.value);
           if (cls === 'bad') mismatchCount++;
-          return el('td', { class: cls, dataset: { path }, ...tipHandlers(path) }, el('input', { type: 'text', value: cell.value == null ? '' : cell.value,
+          return el('td', { class: cls, dataset: { path, ri, ci }, ...tipHandlers(path), ...cellMouse(ri, ci) }, el('input', { type: 'text', value: cell.value == null ? '' : cell.value,
             onfocus: () => showAdoptBar(ri, h, path),
-            oninput: (e) => { cell.value = e.target.value; markDirty(); } }));
+            onkeydown: (e) => { if (e.key === 'Escape') clearSel(); },
+            oninput: (e) => { cell.value = e.target.value; if (inSel(ri, ci)) fillSel(e.target.value); markDirty(); } }));
         }),
         el('td', {}, el('button', { class: 'field-row-del', title: '행 삭제', onclick: () => { t.rows.splice(ri, 1); markDirty(); rerenderAt(); } }, icon('x'))),
       ])));

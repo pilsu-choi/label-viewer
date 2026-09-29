@@ -48,7 +48,7 @@ function thumbImg(bundleId, doc) {
 }
 
 export function renderList(root, bundleId) {
-  const state = { bundle: null, filter: 'all', q: '', view: 'grid', loading: true, error: null };
+  const state = { bundle: null, filter: 'all', docType: '*', q: '', view: 'grid', loading: true, error: null };
 
   const screen = el('div', { class: 'list-screen' });
   mount(root, screen);
@@ -71,6 +71,7 @@ export function renderList(root, bundleId) {
     else if (state.filter === 'pending') docs = docs.filter((d) => d.review !== 'done');
     else if (state.filter === 'missing') docs = docs.filter((d) => !d.has.original || !d.has.preprocessed || !d.has.ao_extract || !d.has.harness || !d.has.golden);
     else if (state.filter === 'error') docs = docs.filter((d) => d.errors && d.errors.length);
+    if (state.docType !== '*') docs = docs.filter((d) => (d.doc_type || '') === state.docType);
     if (state.q.trim()) {
       const q = state.q.trim().toLowerCase();
       docs = docs.filter((d) => d.id.toLowerCase().includes(q) || (d.doc_type || '').toLowerCase().includes(q));
@@ -89,9 +90,16 @@ export function renderList(root, bundleId) {
       ['missing', '데이터 누락', summary.missing],
       ['error', '오류', summary.error],
     ];
+    const typeCounts = new Map();
+    state.bundle.docs.forEach((d) => typeCounts.set(d.doc_type || '', (typeCounts.get(d.doc_type || '') || 0) + 1));
+    const types = [...typeCounts.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b, 'ko'));
     return el('div', { class: 'filter-row' }, [
       ...defs.map(([key, label, n]) => el('button', { class: `chip ${state.filter === key ? 'active' : ''}`,
         onclick: () => { state.filter = key; draw(); } }, [label, el('span', { class: 'n' }, String(n))])),
+      el('select', { class: 'doctype-filter', 'aria-label': '문서 유형 필터', onchange: (e) => { state.docType = e.target.value; draw(); } }, [
+        el('option', { value: '*' }, `모든 문서 유형 (${state.bundle.docs.length})`),
+        ...types.map((t) => el('option', { value: t, selected: t === state.docType }, `${t || '유형 없음'} (${typeCounts.get(t)})`)),
+      ]),
       el('div', { class: 'seg view-seg' }, [
         el('button', { class: state.view === 'grid' ? 'active' : '', onclick: () => { state.view = 'grid'; draw(); }, title: '썸네일', 'aria-label': '썸네일 보기' }, icon('grid')),
         el('button', { class: state.view === 'list' ? 'active' : '', onclick: () => { state.view = 'list'; draw(); }, title: '목록', 'aria-label': '목록 보기' }, icon('list')),
