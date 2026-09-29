@@ -6,6 +6,7 @@ import io
 import json
 import sys
 import zipfile
+from urllib.parse import quote
 from pathlib import Path
 
 import pytest
@@ -355,6 +356,25 @@ def test_path_traversal_rejected(client: TestClient, bundle: dict):
     bid = bundle["id"]
     r = client.get(f"/api/bundles/{bid}/docs/..%2f..%2fetc/image")
     assert r.status_code in (400, 404, 422)
+
+
+def test_unicode_doc_id(client: TestClient):
+    """고객사 파일명(한글·공백·괄호·대괄호)에서 온 문서 ID도 상세·이미지를 연다."""
+    doc_id = "[꾸미기]진단서 01 (1)"
+    golden = json.dumps({"documents": [{"doc_type": "진단서", "extracted_fields": [], "extracted_groups": [], "extracted_tables": []}]})
+    files = [("files", (f"b/original/{doc_id}.png", _png(), "image/png")),
+             ("files", (f"b/golden/{doc_id}.answer.json", golden.encode(), "application/json"))]
+    bid = client.post("/api/bundles", files=files).json()["id"]
+    assert [d["id"] for d in client.get(f"/api/bundles/{bid}").json()["docs"]] == [doc_id]
+    assert client.get(f"/api/bundles/{bid}/docs/{quote(doc_id)}").status_code == 200
+    assert client.get(f"/api/bundles/{bid}/docs/{quote(doc_id)}/image").status_code == 200
+
+
+def _png() -> bytes:
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "white").save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _harness_json(action: str, ao: str, title: str) -> bytes:

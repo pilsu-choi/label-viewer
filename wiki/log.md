@@ -13,6 +13,10 @@ status: active
 
 ## 2026-09-29
 
+### Creation
+
+- [한글·공백·괄호 파일명 문서 400 오류 수정과 표본 205건 업로드](2026-09-29-unicode-doc-id.md): 문서 ID 검사 완화, 205건 번들 변환·업로드 기록.
+
 ### Update
 
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): Golden 초안 수정 반영 AWS 재배포 결과 추가.
