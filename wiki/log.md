@@ -93,3 +93,6 @@ status: active
 
 ### Creation
 - [문서 유형 필터와 편집 탭 표 다중 셀 일괄 입력](2026-09-29-doctype-filter-multicell.md): 목록 문서 유형 select 필터, 표 드래그·Shift+클릭 범위 선택 후 같은 값 일괄 입력, 채택 바 상시 표시로 표 밀림 제거.
+
+### Update
+- [문서 유형 필터와 편집 탭 표 다중 셀 일괄 입력](2026-09-29-doctype-filter-multicell.md): 상세 화면 문서 목록 유형 필터, 목록 화면과 선택 공유, 문서 이동 시 필터 유지 추가.

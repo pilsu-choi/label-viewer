@@ -269,3 +269,18 @@ export function classBadges(c) {
 export function mismatchBadge(m) {
   return m ? el('span', { class: 'badge badge-warn', title: `AO: ${m.ao} → 제목: ${m.title}${m.title_line ? ` (${m.title_line})` : ''}` }, '양식 불일치') : null;
 }
+
+// 문서 유형 필터. 번들별 선택값을 목록 화면과 상세 화면 문서 목록이 함께 쓴다('*' = 전체, '' = 유형 없음).
+const docTypeFilters = new Map();
+export const getDocTypeFilter = (bundleId) => docTypeFilters.get(bundleId) || '*';
+export const matchDocType = (doc, type) => type === '*' || (doc.doc_type || '') === type;
+export function docTypeSelect(docs, bundleId, onChange, cls) {
+  const counts = new Map();
+  docs.forEach((d) => counts.set(d.doc_type || '', (counts.get(d.doc_type || '') || 0) + 1));
+  const types = [...counts.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b, 'ko'));
+  const cur = getDocTypeFilter(bundleId);
+  return el('select', { class: cls, 'aria-label': '문서 유형 필터', onchange: (e) => { docTypeFilters.set(bundleId, e.target.value); onChange(e.target.value); } }, [
+    el('option', { value: '*' }, `모든 유형 (${docs.length})`),
+    ...types.map((t) => el('option', { value: t, selected: t === cur }, `${t || '유형 없음'} (${counts.get(t)})`)),
+  ]);
+}
