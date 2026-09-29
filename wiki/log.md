@@ -96,3 +96,6 @@ status: active
 
 ### Update
 - [문서 유형 필터와 편집 탭 표 다중 셀 일괄 입력](2026-09-29-doctype-filter-multicell.md): 상세 화면 문서 목록 유형 필터, 목록 화면과 선택 공유, 문서 이동 시 필터 유지 추가.
+
+### Update
+- [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): dev `d5aba7e` 기준 번들 `0.1.0-20260930-d5aba7e` 재빌드, 반입 이력 표 추가.
