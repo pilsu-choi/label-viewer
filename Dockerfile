@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
-RUN groupadd -r labelviewer && useradd -r -g labelviewer -d /app labelviewer
+# k8s securityContext(runAsUser·fsGroup)와 맞추려고 uid/gid 를 고정한다
+RUN groupadd -r -g 10001 labelviewer && useradd -r -u 10001 -g labelviewer -d /app labelviewer
 
 WORKDIR /app
 

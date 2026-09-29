@@ -16,9 +16,14 @@ spec:
       labels:
         app: label-viewer
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001   # PVC 를 labelviewer 가 쓸 수 있게 한다
       containers:
         - name: label-viewer
-          image: label-viewer:latest
+          image: label-viewer
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8765

@@ -143,7 +143,13 @@ deploy/aws/down.sh               # 정지(볼륨 보존)
 
 ```bash
 docker build -t label-viewer:latest .
-kubectl apply -k deploy/k8s          # PVC(/data) + Deployment(Recreate) + Service(80→8765)
+kubectl apply -k deploy/k8s          # PVC(/data) + Deployment(Recreate, uid 10001) + Service(NodePort 30920)
+```
+
+폐쇄망(레지스트리 없음)은 오프라인 번들로 반입한다. 설치·업그레이드·삭제는 번들의 `INSTALL.md` 참고.
+
+```bash
+deploy/k8s/build-bundle.sh [--tar] [출력디렉토리]   # → dist/label-viewer-k8s-<태그>/ (이미지 tar + 매니페스트 + install.sh)
 ```
 
 ## 구조
@@ -155,7 +161,7 @@ scripts/   make_dummy_bundle.py(합성 자료) · make_dummy2.py(실제 E2E 자�
 tests/     test_app.py
 docker-compose.yml  단일 컨테이너 배포(로컬·AWS 공용)
 deploy/aws deploy · tunnel · logs · down (AWS 개발 서버)
-deploy/k8s pvc · deployment · service · kustomization
+deploy/k8s pvc · deployment · service · kustomization · build-bundle.sh · bundle/(install·remove·INSTALL.md)
 ```
 
 ## 보안
