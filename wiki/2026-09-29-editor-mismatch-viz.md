@@ -34,3 +34,13 @@ status: active
   - 요약 바에 `불일치 1 · 빈 값 0 · Golden에 없음 1`이 표시됐다.
   - AO 칩을 누르자 해당 값이 실제 행으로 바뀌었다.
 - 표 ghost strip과 ghost 그룹/표 블록은 화면으로 확인하지 않았다.
+
+## 후속 수정: 표 셀 강조가 절반만 칠해지던 문제
+
+브랜치: `fix/table-cell-highlight`, 워크트리: `label_veiwer/.worktrees/table-cell-highlight`
+
+`16.소견서 5`의 `병명내역` 표에서 주황 테두리가 셀의 절반에만 그려졌다. 원인은 두 가지다.
+- 테두리를 셀(`td`)이 아니라 입력칸에 걸었다.
+- 표 입력칸은 `field-sizing: content`여서 글자 길이만큼만 넓어진다. 열 머리글이 더 넓으면 입력칸이 셀보다 좁아진다.
+
+테두리(`inset box-shadow`)를 `td.bad`·`td.warn`으로 옮기고, 입력칸 최소 폭을 `max(72px, 100%)`로 바꿔 셀을 채우게 했다. 수정 전후 스크린샷으로 셀 전체가 강조되는 것을 확인했다.

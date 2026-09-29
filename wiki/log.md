@@ -87,3 +87,6 @@ status: active
 
 ### Creation
 - [편집 탭 불일치 강조와 Golden에 없는 키 ghost 행](2026-09-29-editor-mismatch-viz.md): 불일치 칸 테두리 강조, AO·Harness에만 있는 키를 채택 가능한 ghost 행으로 표시.
+
+### Update
+- [편집 탭 불일치 강조와 Golden에 없는 키 ghost 행](2026-09-29-editor-mismatch-viz.md): 표 셀 강조가 절반만 칠해지던 문제 수정 내용 추가.
