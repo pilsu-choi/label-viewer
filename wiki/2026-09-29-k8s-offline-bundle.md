@@ -53,6 +53,15 @@ kind(v1.3x) 노드 컨테이너 안에서 번들 `0.1.0-20260929-e24e876` 설치
 - 기본 StorageClass 경로(`-n lv2 --no-import`) 설치·재실행 성공
 - `remove.sh`(PVC·PV 유지), `remove.sh --purge`(모두 삭제) 확인
 
+## 반입 이력
+
+| 날짜 | 번들 | 커밋 | 비고 |
+|---|---|---|---|
+| 2026-09-29 | `label-viewer-k8s-0.1.0-20260929-e24e876` | `e24e876` | 최초 번들(삭제됨) |
+| 2026-09-30 | `label-viewer-k8s-0.1.0-20260930-d5aba7e` | `d5aba7e`(dev) | 문서 유형 필터·표 다중 셀 입력 등 반영, 192M, SHA256SUMS 검증 |
+
+번들은 `C:\Users\user\Desktop\미래에셋\` 에 두고 이전 번들은 지운다.
+
 ## 남은 일
 
 - 실제 개발계 노드(RHEL9 containerd)에서 설치 확인.
