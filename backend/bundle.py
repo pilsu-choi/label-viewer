@@ -269,8 +269,10 @@ def _ao_cell(cell: dict, prefix: str = "") -> dict:
     return out
 
 
-def canonical_ao(data: dict | None) -> dict | None:
-    """AO UI response → canonical extracted_* schema; upload file remains unchanged."""
+def canonical_doc(data: dict | None) -> dict | None:
+    """AO/Harness 실행 응답(result.fields/groups/tables) → canonical extracted_* 스키마; 업로드 파일은 그대로 둔다."""
+    if isinstance(data, dict) and "documents" not in data and isinstance(data.get("result"), dict):
+        data = {k: v for k, v in data.items() if k != "result"} | {"documents": [{"result": data["result"]}]}
     if not isinstance(data, dict) or not isinstance(data.get("documents"), list):
         return data
     docs = []
@@ -302,6 +304,7 @@ def canonical_ao(data: dict | None) -> dict | None:
                 rows.append(cells)
             tables.append({**table, "rows": rows})
         docs.append({
+            **({"harness": result["harness"]} if "harness" in result else {}),
             "doc_type": result.get("doc_type") or result.get("document_type") or source.get("doc_type", ""),
             "extracted_fields": [_ao_cell(c) for c in result.get("fields") or []],
             "extracted_groups": groups,
@@ -310,9 +313,9 @@ def canonical_ao(data: dict | None) -> dict | None:
     return {**data, "documents": docs} if converted else data
 
 
-def load_ao_extract(path: Path | None) -> tuple[dict | None, str | None]:
+def load_doc_json(path: Path | None) -> tuple[dict | None, str | None]:
     data, err = load_json_safe(path)
-    return canonical_ao(data), err
+    return canonical_doc(data), err
 
 
 def page_count(path: Path) -> int:
@@ -373,7 +376,7 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     errors = []
     parsed: dict[str, dict | None] = {}
     for k in CORE_JSON_KINDS:
-        data, err = load_ao_extract(paths[k]) if k == "ao_extract" else load_json_safe(paths[k])
+        data, err = load_doc_json(paths[k])
         parsed[k] = data
         if err:
             errors.append(f"{k}: {err}")
@@ -427,7 +430,7 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
         errors = []
         parsed: dict[str, dict | None] = {}
         for k in CORE_JSON_KINDS:
-            data, err = load_ao_extract(paths[k]) if k == "ao_extract" else load_json_safe(paths[k])
+            data, err = load_doc_json(paths[k])
             parsed[k] = data
             if err:
                 errors.append(f"{k}: {err}")
@@ -572,13 +575,13 @@ def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_
         data = copy.deepcopy(EMPTY_GOLDEN)
     elif source == "ao":
         apath = find_kind_file(bdir, "ao_extract", doc_id)
-        data, err = load_ao_extract(apath)
+        data, err = load_doc_json(apath)
         if data is None:
             raise ApiError(404, f"ao_extract not available: {err or 'missing'}")
         data = copy.deepcopy(data)
     elif source == "harness":
         hpath = find_kind_file(bdir, "harness", doc_id)
-        hdata, err = load_json_safe(hpath)
+        hdata, err = load_doc_json(hpath)
         if hdata is None:
             raise ApiError(404, f"harness not available: {err or 'missing'}")
         data = _from_harness(hdata)
