@@ -124,3 +124,23 @@ def test_ao_ui_response_in_ao_extract_is_canonicalized_but_raw_is_preserved(tmp_
     assert all(row["ao_status"] == "MATCH" for row in detail["compare"])
     assert bundle_view(tmp_path, bundle_id)["summary"]["score"]["ao"]["accuracy"] == 1.0
     assert (tmp_path / "bundles" / bundle_id / "ao_extract" / "D2-DET-001.json").read_bytes() == raw
+
+
+def test_run_result_harness_without_documents_creates_golden_draft(tmp_path):
+    import json
+    run = {"stage": "extract", "harness": {"tier": "pass"}, "result": {
+        "doc_type": "receipt",
+        "fields": [{**token_box("date", "20240101", [.1, .2, .3, .04]), "harness": {"final_value": "20240102"}}],
+        "groups": [{"key": "patient", "fields": [token_box("patient.name", "Kim", [.2, .3, .1, .02])]}],
+        "tables": [{"key": "items", "headers": ["amount"], "rows": [[token_box("items[0].amount", "1", [.4, .5, .1, .03])]]}],
+    }}
+    files = [("out/original/D1.png", b"image"),
+             ("out/harness/D1.harness.json", json.dumps(run).encode()),
+             ("out/ao_extract/D1.aiocr.json", json.dumps(run).encode())]
+    bundle_id = process_upload(tmp_path, files, None, 10000)
+    doc = create_golden(tmp_path, bundle_id, "D1", "harness")["golden"]["documents"][0]
+
+    assert doc["doc_type"] == "receipt"
+    assert "harness" not in doc and "harness" not in doc["extracted_fields"][0]
+    assert doc["extracted_groups"][0]["fields"][0]["key"] == "name"
+    assert doc["extracted_tables"][0]["rows"][0][0]["key"] == "amount"
