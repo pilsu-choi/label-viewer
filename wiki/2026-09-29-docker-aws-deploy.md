@@ -42,6 +42,7 @@ status: active
 - AWS 재배포(2026-09-29, dev `816753c`): 실행 응답 형식 Golden 초안 수정 반영. 컨테이너 `healthy`, `out_label_viewer.zip` 업로드 후 하네스 초안 생성 확인(진료비영수증, fields 5·groups 3·tables 1), 검증 번들 삭제.
 - AWS 재배포(2026-09-30, dev `33fce14`): 전체 묶음 ZIP 내보내기 반영. 컨테이너 `healthy`, 외부에서 `bundle.zip` 200(5개 폴더 20파일) 확인.
 - AWS 재배포(2026-09-30, dev `f99f315`·`dc1f0f4`): 한글 파일명 ZIP 인식, 업로드·조회 오류 전수 점검 반영. Windows(CP949) ZIP 문서 ID `진단서 1` 인식, BOM·형식 오류 JSON이 문서 오류로 격리되고 번들 목록 200, 손상 ZIP 400 확인. 검증 번들 삭제.
+- AWS 재배포(2026-09-30, dev `8f54242`): 성능 최적화 반영. 컨테이너 `healthy`, uvicorn 워커 2개 기동, 외부에서 `/static/<ver>/` `immutable` 캐시·JS gzip 응답, `/api/bundles` 200 확인.
 - 외부 접속: 배포 직후 외부 요청은 타임아웃이었다. 서버에 firewalld가 없으므로 보안그룹 인바운드 TCP 8765를 열어야 한다.
 
 ## 외부 노출 주의
