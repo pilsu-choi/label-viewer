@@ -1,4 +1,4 @@
-import { el, clear, mount, toast, isEditingTarget, isMismatch, icon, menuButton, mismatchBadge, classBadges } from './util.js';
+import { el, clear, mount, debounce, toast, isEditingTarget, isMismatch, icon, menuButton, mismatchBadge, classBadges } from './util.js';
 import { api } from './api.js';
 import { navigate, setNavGuard } from './router.js';
 import { createImageViewer } from './imageViewer.js';
@@ -30,7 +30,8 @@ export function renderDetail(root, bundleId, docId) {
   let saveStateEl, reviewInput, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
   let leftPanel, rightPanel, closeExportMenus, dragCleanup;
   let railHost, workspace, body, rightCollapseBtn;
-  let destroyed = false;
+  let destroyed = false, compareStale = false, rawBuilt = false;
+  const drawReconLater = debounce(() => drawRecon(), 300);
 
   mount(root, el('div', { class: 'loading-block' }, '불러오는 중…'));
 
@@ -154,7 +155,7 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function drawRecon() {
-    if (!reconBody) return;
+    if (!reconBody || state.reconCollapsed) return; // 접힌 동안은 그리지 않고 펼칠 때 그린다
     let sourceObj;
     if (state.reconSource === 'golden') sourceObj = (editor && editor.getGoldenObject()) || doc.golden;
     else if (state.reconSource === 'ao') sourceObj = doc.ao;
@@ -168,6 +169,8 @@ export function renderDetail(root, bundleId, docId) {
     state.tab = tab;
     for (const k in tabButtons) tabButtons[k].classList.toggle('active', k === tab);
     for (const k in tabHosts) tabHosts[k].style.display = k === tab ? 'flex' : 'none';
+    if (tab === 'compare' && compareStale) { compareStale = false; compareApi.refresh(doc); }
+    if (tab === 'raw' && !rawBuilt) { rawBuilt = true; buildRawTab(); }
   }
 
   function loadImage() {
@@ -191,7 +194,8 @@ export function renderDetail(root, bundleId, docId) {
   function refreshAfterDocUpdate(updated) {
     doc = updated;
     syncDocumentRail();
-    compareApi && compareApi.refresh(doc);
+    if (state.tab === 'compare') compareApi.refresh(doc); else compareStale = true;
+    drawReconLater.cancel();
     drawRecon();
     if (reviewInput) reviewInput.checked = doc.review === 'done';
     updateTabCounts();
@@ -300,7 +304,7 @@ export function renderDetail(root, bundleId, docId) {
 
     editor = createGoldenEditor(tabHosts.edit, {
       bundleId, docId, doc,
-      onDirtyChange: (isDirty) => { setSaveState(isDirty ? 'dirty' : 'saved', isDirty ? '변경사항 있음' : '저장됨'); if (state.reconSource === 'golden') drawRecon(); },
+      onDirtyChange: (isDirty) => { setSaveState(isDirty ? 'dirty' : 'saved', isDirty ? '변경사항 있음' : '저장됨'); if (isDirty && state.reconSource === 'golden') drawReconLater(); },
       onSaveStart: () => setSaveState('saving', '저장 중…'),
       onSaveOk: (updated) => { setSaveState('saved', '저장됨'); refreshAfterDocUpdate(updated); toast('저장했습니다.'); },
       onSaveErr: () => setSaveState('dirty', '변경사항 있음'),
@@ -313,8 +317,6 @@ export function renderDetail(root, bundleId, docId) {
       onHoverBbox,
       onGoToEdit: () => setTab('edit'),
     });
-
-    buildRawTab();
 
     const vsplit = el('div', { class: 'splitter v', style: state.reconCollapsed ? 'display:none' : '' });
     reconBody = el('div', { class: 'recon-body' });
@@ -345,6 +347,7 @@ export function renderDetail(root, bundleId, docId) {
       vsplit.style.display = state.reconCollapsed ? 'none' : '';
       reconCollapseBtn.title = state.reconCollapsed ? '펼치기' : '접기';
       clear(reconCollapseBtn); reconCollapseBtn.appendChild(icon(state.reconCollapsed ? 'chevron-right' : 'chevron-down'));
+      drawRecon();
     }
 
     let dragging = false, startY = 0, startH = 0;
@@ -405,6 +408,7 @@ export function renderDetail(root, bundleId, docId) {
     loadImage();
     drawRecon();
     updateTabCounts();
+    for (const id of [doc.prev, doc.next]) if (id && doc.has[state.view]) new Image().src = api.imageUrl(bundleId, id, state.view); // 이웃 문서 이미지 미리 받기
   }
 
   function buildRawTab() {
@@ -436,6 +440,7 @@ export function renderDetail(root, bundleId, docId) {
   return () => {
     destroyed = true;
     document.removeEventListener('keydown', onKeydown);
+    drawReconLater.cancel();
     if (closeExportMenus) document.removeEventListener('click', closeExportMenus);
     if (dragCleanup) dragCleanup();
     if (documentRail) documentRail.destroy();

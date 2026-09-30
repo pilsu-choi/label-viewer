@@ -12,7 +12,7 @@ python3 -m backend.app --data ./storage --port 8765     # http://127.0.0.1:8765
 pip install -r requirements-dev.txt && python3 -m pytest tests -q
 ```
 
-환경변수: `LABEL_VIEWER_DATA`(데이터 경로, 기본 `./storage`), `LABEL_VIEWER_MAX_UPLOAD_MB`(기본 2048).
+환경변수: `LABEL_VIEWER_DATA`(데이터 경로, 기본 `./storage`), `LABEL_VIEWER_MAX_UPLOAD_MB`(기본 2048), `LABEL_VIEWER_WORKERS`(uvicorn 워커 수, 기본 2 — `--workers`로도 지정).
 
 ## 테스트용 더미 번들
 

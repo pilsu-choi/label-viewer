@@ -2,9 +2,9 @@
    종이·잉크 톤은 조용히 두고, 형광펜(--hl) 하나만 "지금 봐야 할 곳"에 쓴다:
    hover 한 칸, 이미지 bbox, M 으로 이동한 칸, 파일을 끌어다 놓는 순간. */
 
-@font-face { font-family: "Pretendard"; font-weight: 400; font-display: swap; src: url("/static/fonts/Pretendard-Regular.subset.woff2") format("woff2"); }
-@font-face { font-family: "Pretendard"; font-weight: 600; font-display: swap; src: url("/static/fonts/Pretendard-SemiBold.subset.woff2") format("woff2"); }
-@font-face { font-family: "Pretendard"; font-weight: 700; font-display: swap; src: url("/static/fonts/Pretendard-Bold.subset.woff2") format("woff2"); }
+@font-face { font-family: "Pretendard"; font-weight: 400; font-display: swap; src: url("fonts/Pretendard-Regular.subset.woff2") format("woff2"); }
+@font-face { font-family: "Pretendard"; font-weight: 600; font-display: swap; src: url("fonts/Pretendard-SemiBold.subset.woff2") format("woff2"); }
+@font-face { font-family: "Pretendard"; font-weight: 700; font-display: swap; src: url("fonts/Pretendard-Bold.subset.woff2") format("woff2"); }
 
 /* ---------- 토큰 ---------- */
 :root {

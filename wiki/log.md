@@ -116,3 +116,6 @@ status: active
 
 ### Update
 - [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): dev `a047041` 기준 번들 `0.1.0-20260930-a047041` 재빌드, 이전 번들 `d5aba7e` 삭제.
+
+### Creation
+- [화면 로드·편집 성능 최적화](2026-09-30-performance-optimization.md): GZip·정적 파일 버전 캐시·썸네일, 파일 시그니처 캐시, 편집 중 재구성·요약 디바운스, 다중 워커.

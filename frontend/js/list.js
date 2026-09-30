@@ -1,4 +1,4 @@
-import { el, mount, clear, fmtPct, scoreCard, icon, menuButton, mismatchBadge, classBadges, getDocTypeFilter, matchDocType, docTypeSelect } from './util.js';
+import { el, mount, debounce, clear, fmtPct, scoreCard, icon, menuButton, mismatchBadge, classBadges, getDocTypeFilter, matchDocType, docTypeSelect } from './util.js';
 import { api } from './api.js';
 import { navigate } from './router.js';
 
@@ -31,6 +31,8 @@ function reviewBadge(review) {
   return el('span', { class: 'badge badge-muted' }, '미검수');
 }
 
+const THUMB_W = 480;
+
 function thumbImg(bundleId, doc) {
   const wrap = el('div', { class: 'doc-thumb' });
   if (!doc.has.original && !doc.has.preprocessed) {
@@ -38,9 +40,9 @@ function thumbImg(bundleId, doc) {
     return wrap;
   }
   const view = doc.has.original ? 'original' : 'preprocessed';
-  const img = el('img', { loading: 'lazy', src: api.imageUrl(bundleId, doc.id, view, 1), alt: doc.id });
+  const img = el('img', { loading: 'lazy', decoding: 'async', src: api.imageUrl(bundleId, doc.id, view, 1, THUMB_W), alt: doc.id });
   img.addEventListener('error', () => {
-    if (view === 'original' && doc.has.preprocessed) { img.src = api.imageUrl(bundleId, doc.id, 'preprocessed', 1); }
+    if (view === 'original' && doc.has.preprocessed) { img.src = api.imageUrl(bundleId, doc.id, 'preprocessed', 1, THUMB_W); }
     else { clear(wrap); wrap.appendChild(el('span', { class: 'ph' }, 'No Image')); }
   }, { once: true });
   wrap.appendChild(img);
@@ -58,7 +60,7 @@ export function renderList(root, bundleId) {
   load();
 
   function load() {
-    api.getBundle(bundleId).then((b) => { state.bundle = b; state.loading = false; draw(); })
+    api.getBundle(bundleId, true).then((b) => { state.bundle = b; state.loading = false; draw(); })
       .catch((e) => { state.error = e.message; state.loading = false; draw(); });
   }
 
@@ -121,7 +123,7 @@ export function renderList(root, bundleId) {
       el('label', { class: 'search-box' }, [
         icon('search'),
         el('input', { type: 'search', placeholder: '문서 ID나 유형으로 찾기', value: state.q,
-          oninput: (e) => { state.q = e.target.value; drawGrid(); } }),
+          oninput: debounce((e) => { state.q = e.target.value; drawGrid(); }, 150) }),
       ]),
       exportMenu(),
     ]);

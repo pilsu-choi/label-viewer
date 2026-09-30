@@ -1,4 +1,4 @@
-import { el, clear, icon, getDocTypeFilter, matchDocType, docTypeSelect } from './util.js';
+import { el, clear, debounce, icon, getDocTypeFilter, matchDocType, docTypeSelect } from './util.js';
 
 const STATE = { pending: ['pending', '미검수', 'muted'], progress: ['progress', '검수 중', 'warn'], done: ['done', '검수 완료', 'ok'], error: ['error', '오류', 'bad'] };
 const stateOf = (doc) => doc.errors && doc.errors.length ? STATE.error
@@ -10,7 +10,7 @@ const kept = { bundleId: null, query: '', filter: 'all' };
 
 export function createDocumentRail(host, docs, currentId, onSelect, { onToggleCollapse, bundleId } = {}) {
   if (kept.bundleId !== bundleId) Object.assign(kept, { bundleId, query: '', filter: 'all' });
-  const search = el('input', { class: 'doc-rail-search', type: 'search', placeholder: '문서 ID·유형 검색', 'aria-label': '문서 검색', value: kept.query, oninput: (e) => { kept.query = e.target.value; draw(); } });
+  const search = el('input', { class: 'doc-rail-search', type: 'search', placeholder: '문서 ID·유형 검색', 'aria-label': '문서 검색', value: kept.query, oninput: debounce((e) => { kept.query = e.target.value; draw(); }, 150) });
   const select = el('select', { class: 'doc-rail-filter', 'aria-label': '검수 상태 필터', onchange: (e) => { kept.filter = e.target.value; draw(); } }, [
     el('option', { value: 'all' }, '모든 상태'), el('option', { value: 'pending' }, '미검수'),
     el('option', { value: 'progress' }, '검수 중'), el('option', { value: 'done' }, '검수 완료'),

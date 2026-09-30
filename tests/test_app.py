@@ -522,3 +522,36 @@ def test_upload_hardening(client: TestClient):
 
     many = [("files", (f"m/original/{i}.png", b"x", "image/png")) for i in range(1100)]
     assert len(client.post("/api/bundles", files=many).json()["docs"]) == 1100
+
+
+# ── 성능(캐시·썸네일·정적 버전) ────────────────────────────────────────────
+
+def test_image_thumbnail_and_cache_header(client: TestClient, bundle: dict):
+    url = f"/api/bundles/{bundle['id']}/docs/MC001/image"
+    full = client.get(url)
+    thumb = client.get(url, params={"w": 10})  # 64 로 clamp
+    assert thumb.headers["content-type"] == "image/jpeg"
+    assert thumb.headers["cache-control"] == full.headers["cache-control"] == "private, max-age=86400"
+    from PIL import Image
+    assert Image.open(io.BytesIO(thumb.content)).width <= 64
+    assert client.get(url, params={"w": 10}).content == thumb.content  # 디스크 캐시 재사용
+
+
+def test_caches_follow_file_changes(client: TestClient, bundle: dict):
+    bid = bundle["id"]
+    before = client.get(f"/api/bundles/{bid}").json()
+    assert client.get(f"/api/bundles/{bid}").json() == before
+    doc = next(d for d in before["docs"] if not d["has"]["golden"])["id"]
+    assert client.post(f"/api/bundles/{bid}/docs/{doc}/golden", json={"from": "empty"}).status_code == 200
+    after = client.get(f"/api/bundles/{bid}").json()
+    assert next(d for d in after["docs"] if d["id"] == doc)["has"]["golden"]
+    assert after["summary"]["golden"] == before["summary"]["golden"] + 1
+    assert next(b for b in client.get("/api/bundles").json() if b["id"] == bid)["counts"]["golden"] == after["summary"]["golden"]
+
+
+def test_static_version_and_gzip(client: TestClient):
+    html = client.get("/").text
+    ver = html.split('"/static/')[1].split("/")[0]
+    assert client.get(f"/static/{ver}/app.js").headers["cache-control"].endswith("immutable")
+    assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
+    assert client.get("/", headers={"accept-encoding": "gzip"}).headers["content-encoding"] == "gzip"

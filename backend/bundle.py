@@ -7,11 +7,12 @@ import os
 import re
 import secrets
 import shutil
+import time
 import unicodedata
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
 
 from PIL import Image, ImageSequence
 
@@ -105,6 +106,33 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
 
 def _atomic_write_json(path: Path, data: Any) -> None:
     _atomic_write_bytes(path, json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8"))
+
+
+# ── 캐시 ──────────────────────────────────────────────────────────────────
+# 프로세스 내 캐시. 키에 파일 (inode, mtime_ns, size) 시그니처를 넣어 원자적 교체·외부 변경(다른 워커 포함)에도 무효화된다.
+
+_MEMO: dict = {}
+_MEMO_MAX = 4096
+_RACY_NS = 20_000_000  # mtime 이 방금 전이면 같은 tick 의 재기록을 못 알아볼 수 있어 키를 매번 다르게 한다
+
+
+def _sig(p: Path) -> tuple | None:
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    racy = (time.monotonic_ns(),) if time.time_ns() - st.st_mtime_ns < _RACY_NS else ()
+    return (st.st_ino, st.st_mtime_ns, st.st_size, *racy)
+
+
+def _memo(key: tuple, fn: Callable[[], Any]) -> Any:
+    try:
+        return _MEMO[key]
+    except KeyError:
+        if len(_MEMO) >= _MEMO_MAX:
+            _MEMO.clear()
+        val = _MEMO[key] = fn()
+        return val
 
 
 # ── 경로 ──────────────────────────────────────────────────────────────────
@@ -241,37 +269,37 @@ def _natural_key(s: str):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
 
 
+def _names(d: Path) -> frozenset[str]:
+    """디렉터리 파일명 집합(디렉터리 mtime 기준 캐시)."""
+    sig = _sig(d)
+    if sig is None:
+        return frozenset()
+    return _memo(("names", str(d), sig), lambda: frozenset(e.name for e in os.scandir(d) if not e.name.startswith(".")))
+
+
 def find_kind_file(bdir: Path, kind: str, doc_id: str) -> Path | None:
-    d = bdir / kind
-    if not d.is_dir():
-        return None
-    if kind in JSON_KINDS:
-        p = d / f"{doc_id}.json"
-        return p if p.exists() else None
-    for ext in IMAGE_EXTS:
-        p = d / f"{doc_id}{ext}"
-        if p.exists():
-            return p
+    names = _names(bdir / kind)
+    for ext in ((".json",) if kind in JSON_KINDS else IMAGE_EXTS):
+        if f"{doc_id}{ext}" in names:
+            return bdir / kind / f"{doc_id}{ext}"
     return None
 
 
 def doc_ids(bdir: Path) -> list[str]:
-    ids: set[str] = set()
-    for kind in DOC_KINDS:
-        d = bdir / kind
-        if not d.is_dir():
-            continue
-        for p in d.iterdir():
-            if p.name.startswith("."):
-                continue
-            stem = p.stem if kind in JSON_KINDS else p.stem
-            ids.add(stem)
-    return sorted(ids, key=_natural_key)
+    kdirs = [bdir / k for k in DOC_KINDS]
+    return _memo(("ids", str(bdir), tuple(map(_sig, kdirs))),
+                 lambda: sorted({Path(n).stem for d in kdirs for n in _names(d)}, key=_natural_key))
 
 
-def load_json_safe(path: Path | None) -> tuple[dict | None, str | None]:
-    if path is None or not path.exists():
+def load_json_safe(path: Path | None, canonical: bool = False) -> tuple[dict | None, str | None]:
+    """JSON 로드(+검증, canonical 이면 AO/Harness 응답 변환). 결과는 캐시되므로 호출자는 수정하지 않는다."""
+    sig = _sig(path) if path else None
+    if sig is None:
         return None, None
+    return _memo(("json", str(path), sig, canonical), lambda: _load_json(path, canonical))
+
+
+def _load_json(path: Path, canonical: bool) -> tuple[dict | None, str | None]:
     try:
         data = json.loads(read_json_text(path))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -281,7 +309,7 @@ def load_json_safe(path: Path | None) -> tuple[dict | None, str | None]:
     docs = data.get("documents", []) if isinstance(data, dict) else None
     if not isinstance(docs, list) or not all(isinstance(d, dict) for d in docs):
         return None, "JSON 형식 오류: 최상위 객체와 documents 객체 목록이 필요합니다"
-    return data, None
+    return (canonical_doc(data) if canonical else data), None
 
 
 def read_json_text(path: Path) -> str:
@@ -358,18 +386,21 @@ def canonical_doc(data: dict | None) -> dict | None:
 
 
 def load_doc_json(path: Path | None) -> tuple[dict | None, str | None]:
-    data, err = load_json_safe(path)
-    return canonical_doc(data), err
+    return load_json_safe(path, True)
 
 
-def page_count(path: Path) -> int:
-    if path.suffix.lower() not in (".tif", ".tiff"):
-        return 1
+def _count_pages(path: Path) -> int:
     try:
         with Image.open(path) as im:
             return sum(1 for _ in ImageSequence.Iterator(im))
     except Exception:
         return 1
+
+
+def page_count(path: Path) -> int:
+    if path.suffix.lower() not in (".tif", ".tiff"):
+        return 1
+    return _memo(("pages", str(path), _sig(path)), lambda: _count_pages(path))
 
 
 def _doc_type_of(*jsons: dict | None) -> str:
@@ -457,37 +488,53 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     }
 
 
+def _doc_summary(bdir: Path, doc_id: str, rv: str) -> dict:
+    """bundle_view 의 문서 한 줄 요약. 문서 파일 시그니처+검수 상태가 같으면 캐시를 쓴다."""
+    paths = {k: find_kind_file(bdir, k, doc_id) for k in (*DOC_KINDS, "ao_ui")}
+    return _memo(("sum", str(bdir), doc_id, rv, tuple(_sig(p) if p else None for p in paths.values())),
+                 lambda: _compute_summary(paths, doc_id, rv))
+
+
+def _compute_summary(paths: dict, doc_id: str, rv: str) -> dict:
+    has = {k: paths[k] is not None for k in DOC_KINDS}
+    errors = []
+    parsed: dict[str, dict | None] = {}
+    for k in CORE_JSON_KINDS:
+        data, err = load_doc_json(paths[k])
+        parsed[k] = data
+        if err:
+            errors.append(f"{k}: {err}")
+    parsed["ao_ui"], ao_ui_err = load_json_safe(paths["ao_ui"])
+    if ao_ui_err:
+        errors.append(f"ao_ui: {ao_ui_err}")
+    try:
+        rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"], parsed["ao_ui"]) if parsed["golden"] else []
+    except Exception as e:  # 형식이 어긋난 JSON 하나가 번들 전체 조회를 막지 않게 한다
+        rows, errors = [], [*errors, f"compare: {e}"]
+    sc = {"ao": score(rows, "ao") if parsed["golden"] else None,
+          "harness": score(rows, "harness") if parsed["golden"] else None}
+    mismatch = sum(1 for r in rows if r.get("ao_status") not in ("", "MATCH") or r.get("harness_status") not in ("", "MATCH"))
+    return {
+        "id": doc_id, "has": has, "errors": errors, "review": rv,
+        "doc_type": label(_doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"])),
+        "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
+        "classification": _classification(parsed), "score": sc, "mismatch": mismatch,
+    }
+
+
 def bundle_view(data_dir: Path, bundle_id: str) -> dict:
     bdir = bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
         raise ApiError(404, "bundle not found")
     state = load_state(bdir)
     review = state.get("review") or {}
-    docs = []
     agg = {"ao": {"MATCH": 0, "MISMATCH": 0, "MISSING": 0, "EXTRA": 0, "TYPE_MISMATCH": 0, "total": 0},
            "harness": {"MATCH": 0, "MISMATCH": 0, "MISSING": 0, "EXTRA": 0, "TYPE_MISMATCH": 0, "total": 0}}
     cls_sum = {"ao": [0, 0], "harness": [0, 0]}  # [정답 수, 판정 문서 수]
     n_golden = n_reviewed = n_missing = n_error = 0
-    for doc_id in doc_ids(bdir):
-        paths = {k: find_kind_file(bdir, k, doc_id) for k in DOC_KINDS}
-        has = {k: paths[k] is not None for k in DOC_KINDS}
-        errors = []
-        parsed: dict[str, dict | None] = {}
-        for k in CORE_JSON_KINDS:
-            data, err = load_doc_json(paths[k])
-            parsed[k] = data
-            if err:
-                errors.append(f"{k}: {err}")
-        parsed["ao_ui"], ao_ui_err = load_json_safe(find_kind_file(bdir, "ao_ui", doc_id))
-        if ao_ui_err:
-            errors.append(f"ao_ui: {ao_ui_err}")
-        try:
-            rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"], parsed["ao_ui"]) if parsed["golden"] else []
-        except Exception as e:  # 형식이 어긋난 JSON 하나가 번들 전체 조회를 막지 않게 한다
-            rows, errors = [], [*errors, f"compare: {e}"]
-        sc = {"ao": score(rows, "ao") if parsed["golden"] else None,
-              "harness": score(rows, "harness") if parsed["golden"] else None}
-        cls = _classification(parsed)
+    docs = [_doc_summary(bdir, doc_id, review.get(doc_id, "")) for doc_id in doc_ids(bdir)]
+    for d in docs:
+        has, cls, sc = d["has"], d["classification"], d["score"]
         for side in ("ao", "harness"):
             if cls[side] is not None:
                 cls_sum[side][0] += cls[side]
@@ -495,22 +542,10 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
             if sc[side] and cls[side] is not False:
                 for k in ("MATCH", "MISMATCH", "MISSING", "EXTRA", "TYPE_MISMATCH", "total"):
                     agg[side][k] += sc[side][k]
-        rv = review.get(doc_id, "")
-        if has["golden"]:
-            n_golden += 1
-        if rv == "done":
-            n_reviewed += 1
-        if not (has["original"] and has["ao_extract"] and has["harness"] and has["golden"]):
-            n_missing += 1
-        if errors:
-            n_error += 1
-        mismatch = sum(1 for r in rows if r.get("ao_status") not in ("", "MATCH") or r.get("harness_status") not in ("", "MATCH"))
-        docs.append({
-            "id": doc_id, "has": has, "errors": errors, "review": rv,
-            "doc_type": label(_doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"])),
-            "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
-            "classification": cls, "score": sc, "mismatch": mismatch,
-        })
+        n_golden += has["golden"]
+        n_reviewed += d["review"] == "done"
+        n_missing += not (has["original"] and has["ao_extract"] and has["harness"] and has["golden"])
+        n_error += bool(d["errors"])
 
     def _finish(a: dict) -> dict | None:
         if a["total"] == 0:
@@ -531,6 +566,17 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
     }
 
 
+def _bundle_counts(bdir: Path, review: dict) -> dict:
+    ids = doc_ids(bdir)
+    n_golden = n_reviewed = n_error = 0
+    for doc_id in ids:
+        n_golden += find_kind_file(bdir, "golden", doc_id) is not None
+        n_reviewed += review.get(doc_id) == "done"
+        kinds = (*CORE_JSON_KINDS, "ao_ui")
+        n_error += any(load_json_safe(find_kind_file(bdir, k, doc_id))[1] for k in kinds)
+    return {"docs": len(ids), "golden": n_golden, "reviewed": n_reviewed, "error": n_error}
+
+
 def list_bundles(data_dir: Path) -> list[dict]:
     root = bundles_root(data_dir)
     if not root.is_dir():
@@ -540,28 +586,11 @@ def list_bundles(data_dir: Path) -> list[dict]:
         if not bdir.is_dir():
             continue
         state = load_state(bdir)
-        ids = doc_ids(bdir)
-        n_golden = n_reviewed = n_error = 0
-        review = state.get("review") or {}
-        for doc_id in ids:
-            if find_kind_file(bdir, "golden", doc_id):
-                n_golden += 1
-            if review.get(doc_id) == "done":
-                n_reviewed += 1
-            bad = False
-            for k in CORE_JSON_KINDS:
-                _, err = load_json_safe(find_kind_file(bdir, k, doc_id))
-                if err:
-                    bad = True
-                    break
-            ui_path = find_kind_file(bdir, "ao_ui", doc_id)
-            if ui_path and load_json_safe(ui_path)[1]:
-                bad = True
-            if bad:
-                n_error += 1
+        # 문서 파일 추가·삭제·교체는 kind 디렉터리 mtime 에, 검수 상태는 _state.json 에 나타난다
+        sig = (*(_sig(bdir / k) for k in (*DOC_KINDS, "ao_ui")), _sig(bdir / "_state.json"))
         out.append({
             "id": bdir.name, "name": state.get("name", bdir.name), "created_at": state.get("created_at", ""),
-            "counts": {"docs": len(ids), "golden": n_golden, "reviewed": n_reviewed, "error": n_error},
+            "counts": _memo(("counts", str(bdir), sig), lambda: _bundle_counts(bdir, state.get("review") or {})),
         })
     out.sort(key=lambda b: b["created_at"], reverse=True)
     return out
@@ -692,8 +721,9 @@ def set_review(data_dir: Path, bundle_id: str, doc_id: str, review: str) -> None
 
 # ── 이미지 ────────────────────────────────────────────────────────────────
 
-def get_image(data_dir: Path, bundle_id: str, doc_id: str, view: str, page: int) -> tuple[Path, int]:
-    """(반환할 파일 경로, 전체 페이지 수). 없으면 ApiError(404)."""
+def get_image(data_dir: Path, bundle_id: str, doc_id: str, view: str, page: int,
+              w: int | None = None) -> tuple[Path, int]:
+    """(반환할 파일 경로, 전체 페이지 수). w 가 있으면 폭 w(64~1600) 이하 JPEG 썸네일. 없으면 ApiError(404)."""
     if view not in ("original", "preprocessed"):
         raise ApiError(422, "invalid view")
     bdir = bundle_dir(data_dir, bundle_id)
@@ -703,19 +733,30 @@ def get_image(data_dir: Path, bundle_id: str, doc_id: str, view: str, page: int)
     n_pages = page_count(src)
     page = max(1, min(page, n_pages))
     ext = src.suffix.lower()
-    if ext not in (".tif", ".tiff", ".bmp"):
+    if w is None and ext not in (".tif", ".tiff", ".bmp"):
         return src, n_pages
 
     cdir = cache_root(data_dir) / bundle_id / view
     cdir.mkdir(parents=True, exist_ok=True)
-    cached = cdir / f"{doc_id}.p{page}.png"
+    if w is None:
+        cached = cdir / f"{doc_id}.p{page}.png"
+    else:
+        w = max(64, min(w, 1600))
+        cached = cdir / f"{doc_id}.p{page}.{src.stat().st_mtime_ns}.w{w}.jpg"
     if not cached.exists():
+        tmp = cached.with_name(f".{secrets.token_hex(4)}{cached.name}")  # 워커 간 동시 생성에도 반쪽 파일이 보이지 않게
         try:
             with Image.open(src) as im:
                 if ext in (".tif", ".tiff"):
                     im.seek(page - 1)
-                im.convert("RGB").save(cached, "PNG")
+                im = im.convert("RGB")
+            if w is None:
+                im.save(tmp, "PNG", compress_level=1)
+            else:
+                im.thumbnail((w, 1 << 16))
+                im.save(tmp, "JPEG", quality=80)
+            os.replace(tmp, cached)
         except Exception as e:
-            cached.unlink(missing_ok=True)
+            tmp.unlink(missing_ok=True)
             raise ApiError(422, f"이미지를 열 수 없습니다: {e}")
     return cached, n_pages

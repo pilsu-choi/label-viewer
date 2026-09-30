@@ -87,12 +87,14 @@ export function createGoldenEditor(host, opts) {
   let cmap = compareMap(doc.compare);
   let saveTimer = null;
   let summaryEl = null;
+  let shownPaths = null; // renderedPaths 캐시(render/markDirty 에서 무효화)
   let mismatchCursor = -1; // focusMismatch 가 마지막으로 이동한 위치(버튼 클릭 시 포커스가 버튼으로 옮겨가므로 activeElement 로는 추적 불가)
   const listeners = { dirty: opts.onDirtyChange || (() => {}), start: opts.onSaveStart || (() => {}), ok: opts.onSaveOk || (() => {}), err: opts.onSaveErr || (() => {}) };
 
   const debouncedSave = debounce(() => { if (autosave) doSave(); }, 1500);
 
-  function markDirty() { dirty = true; listeners.dirty(true); debouncedSave(); updateSummary(); }
+  const updateSummaryLater = debounce(() => updateSummary(), 150);
+  function markDirty() { shownPaths = null; dirty = true; listeners.dirty(true); debouncedSave(); updateSummaryLater(); }
 
   // 필드+그룹+표 셀 전체에서 "Golden 값이 비었는데 소스(AO/Harness)에는 값이 있는" 항목 수.
   function countEmptyWithSource() {
@@ -119,8 +121,9 @@ export function createGoldenEditor(host, opts) {
 
   // 현재 golden 에 그려지는 경로 집합 (경로 형식은 각 렌더러와 동일)
   function renderedPaths() {
+    if (shownPaths) return shownPaths;
     const d0 = golden && golden.documents && golden.documents[0];
-    const s = new Set();
+    const s = shownPaths = new Set();
     if (!d0) return s;
     (d0.extracted_fields || []).forEach((c) => s.add(`documents[0].fields[${c.key}]`));
     (d0.extracted_groups || []).forEach((g) => (g.fields || []).forEach((c) => s.add(`documents[0].groups[${g.key}].fields[${c.key}]`)));
@@ -156,11 +159,12 @@ export function createGoldenEditor(host, opts) {
   }
 
   function render() {
+    shownPaths = null;
     hideTip(); // 다시 그리기 전에 이전 마우스 위치의 tooltip/bbox 하이라이트를 제거(mouseleave 가 못 나므로)
     if (opts.onHoverBbox) opts.onHoverBbox(null);
     clear(host);
     if (!doc.golden) { host.appendChild(renderCreateCard()); return; }
-    if (golden == null) golden = JSON.parse(JSON.stringify(doc.golden));
+    if (golden == null) golden = structuredClone(doc.golden);
     const extraDocs = (golden.documents || []).length - 1;
     summaryEl = el('span', { class: 'gs-summary hint' });
     host.appendChild(el('div', { class: 'gs-subtoolbar' }, [
@@ -647,17 +651,17 @@ export function createGoldenEditor(host, opts) {
       if (active) { const del = active.querySelector('.field-row-del'); if (del) del.click(); }
     },
     getGoldenObject: () => golden,
-    setDoc: (newDoc) => { doc = newDoc; if (!dirty) golden = doc.golden ? JSON.parse(JSON.stringify(doc.golden)) : null; cmap = compareMap(doc.compare); render(); },
+    setDoc: (newDoc) => { doc = newDoc; if (!dirty) golden = doc.golden ? structuredClone(doc.golden) : null; cmap = compareMap(doc.compare); render(); },
     hasGolden: () => !!doc.golden,
     focusMismatch: (dir) => focusMismatch(dir),
     adoptValue: (entry, value) => {
       if (!doc.golden) { toast('먼저 Golden Set을 생성하세요.', 'error'); return; }
-      if (golden == null) golden = JSON.parse(JSON.stringify(doc.golden));
+      if (golden == null) golden = structuredClone(doc.golden);
       applyAdopt(golden, entry, value);
       markDirty();
       if (!advanced) render();
     },
-    destroy: () => { debouncedSave.cancel(); hideTip(); },
+    destroy: () => { debouncedSave.cancel(); updateSummaryLater.cancel(); hideTip(); },
   };
 }
 

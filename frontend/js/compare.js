@@ -338,9 +338,11 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
     const savedScrollTop = prevWrap ? prevWrap.scrollTop : 0;
     let anchorPath = null;
     if (prevWrap) {
-      for (const row of prevWrap.querySelectorAll('tr[data-path]')) {
-        if (row.offsetTop >= prevWrap.scrollTop) { anchorPath = row.dataset.path; break; }
-      }
+      // offsetTop 은 행 순서대로 증가하므로 이분 탐색으로 첫 가시 행을 찾는다.
+      const rows = prevWrap.querySelectorAll('tr[data-path]');
+      let lo = 0, hi = rows.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (rows[mid].offsetTop >= prevWrap.scrollTop) hi = mid; else lo = mid + 1; }
+      if (lo < rows.length) anchorPath = rows[lo].dataset.path;
     }
     const prevSearch = host.querySelector('.cmp-search');
     const searchFocused = !!prevSearch && prevSearch === document.activeElement;
