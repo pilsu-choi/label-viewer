@@ -105,7 +105,7 @@ export function renderList(root, bundleId) {
   function exportMenu() {
     return menuButton('내보내기', [
       el('a', { href: api.exportGoldenXlsxUrl(bundleId) }, [el('b', {}, 'Excel'), el('span', {}, '요약·필드·표·비교 시트')]),
-      el('a', { href: api.exportGoldenZipUrl(bundleId) }, [el('b', {}, 'Golden ZIP'), el('span', {}, '정답지 JSON 전체')]),
+      el('a', { href: api.exportBundleZipUrl(bundleId) }, [el('b', {}, '전체 묶음 ZIP'), el('span', {}, '원본·전처리 이미지, AO·Harness·Golden JSON')]),
     ]);
   }
 

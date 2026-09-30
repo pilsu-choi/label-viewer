@@ -6,6 +6,7 @@ import mimetypes
 import os
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -105,11 +106,12 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
         call(B.set_review, data_dir, bundle_id, doc_id, body.get("review", ""))
         return Response(status_code=204)
 
-    @app.get("/api/bundles/{bundle_id}/export/golden.zip")
-    def export_zip(bundle_id: str):
-        data = call(E.export_golden_zip, data_dir, bundle_id)
+    @app.get("/api/bundles/{bundle_id}/export/bundle.zip")
+    def export_zip(bundle_id: str, doc: Optional[str] = None):
+        data = call(E.export_bundle_zip, data_dir, bundle_id, doc)
+        name = quote(f"{bundle_id}-{doc}.zip" if doc else f"{bundle_id}.zip")
         return Response(content=data, media_type="application/zip",
-                         headers={"Content-Disposition": f'attachment; filename="{bundle_id}-golden.zip"'})
+                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{name}"})
 
     @app.get("/api/bundles/{bundle_id}/export/golden.xlsx")
     def export_xlsx(bundle_id: str, doc: Optional[str] = None):
