@@ -94,7 +94,7 @@ storage/bundles/{bundle_id}/
 ## 엔드포인트
 
 ### POST /api/bundles  (multipart)
-- `files`: 여러 파일. 파일명은 상대 경로(`webkitRelativePath`)를 그대로 쓴다. ZIP 이 하나면 풀어서 처리한다(zip slip 방지).
+- `files`: 여러 파일. 파일명은 상대 경로(`webkitRelativePath`)를 그대로 쓴다. ZIP 이 하나면 풀어서 처리한다(zip slip 방지). UTF-8 플래그 없는 ZIP 항목 이름은 UTF-8, 안 되면 CP949로 읽고 모든 경로를 NFC로 맞춘다. 파일 수 제한 100,000개. JSON은 UTF-8(BOM 허용)·CP949를 읽는다. 손상 ZIP·저장 불가 파일명은 400.
 - `name`: 선택.
 - 응답: `GET /api/bundles/{id}` 와 같음. 201.
 

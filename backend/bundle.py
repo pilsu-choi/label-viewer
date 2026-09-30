@@ -91,7 +91,7 @@ def stem_of(filename: str) -> str:
 
 
 def _safe_id(value: str, what: str = "id") -> str:
-    if not value or not _ID_RE.fullmatch(value) or ".." in value:
+    if not _ID_RE.fullmatch(value or "") or value in (".", ".."):
         raise ApiError(400, f"invalid {what}: {value!r}")
     return value
 
@@ -161,7 +161,11 @@ def _zip_name(info: zipfile.ZipInfo) -> str:
 
 def _iter_zip(fp: BinaryIO) -> list[tuple[str, bytes]]:
     out = []
-    with zipfile.ZipFile(fp) as zf:
+    try:
+        zf = zipfile.ZipFile(fp)
+    except zipfile.BadZipFile:
+        raise ApiError(400, "ZIP 파일을 열 수 없습니다.")
+    with zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
@@ -169,7 +173,10 @@ def _iter_zip(fp: BinaryIO) -> list[tuple[str, bytes]]:
             norm = PurePosixPath(name)
             if norm.is_absolute() or ".." in norm.parts:
                 continue  # zip slip 방지
-            out.append((name, zf.read(info)))
+            try:
+                out.append((name, zf.read(info)))
+            except (RuntimeError, zipfile.BadZipFile) as e:  # 암호·손상 항목
+                raise ApiError(400, f"ZIP 항목을 읽을 수 없습니다: {name} ({e})")
     return out
 
 
@@ -199,6 +206,17 @@ def process_upload(data_dir: Path, files: list[tuple[str, bytes]], name: str | N
     bid = new_bundle_id()
     bdir = bundle_dir(data_dir, bid)
     bdir.mkdir(parents=True, exist_ok=True)
+    try:
+        _write_entries(bdir, entries)
+    except OSError as e:
+        shutil.rmtree(bdir, ignore_errors=True)
+        raise ApiError(400, f"파일을 저장하지 못했습니다(파일명이 너무 길 수 있음): {e.filename or e}")
+
+    save_state(bdir, {"name": bundle_name, "created_at": datetime.now(timezone.utc).isoformat(), "review": {}})
+    return bid
+
+
+def _write_entries(bdir: Path, entries: list[tuple[str, bytes]]) -> None:
     used: dict[tuple[str, str], int] = {}
     for relpath, data in entries:
         kind = classify(relpath)
@@ -209,15 +227,12 @@ def process_upload(data_dir: Path, files: list[tuple[str, bytes]], name: str | N
         n = used.get(key, 0)
         used[key] = n + 1
         final_id = doc_id if n == 0 else f"{doc_id}~{n + 1}"
-        ext = ".json" if kind in JSON_KINDS else Path(relpath).suffix.lower()
-        if kind not in JSON_KINDS and ext not in IMAGE_EXTS:
+        ext = Path(relpath).suffix.lower()
+        if ext not in ({".json"} if kind in JSON_KINDS else IMAGE_EXTS):
             continue
         dest = bdir / kind / f"{final_id}{ext}"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
-
-    save_state(bdir, {"name": bundle_name, "created_at": datetime.now(timezone.utc).isoformat(), "review": {}})
-    return bid
 
 
 # ── 문서 조회 ─────────────────────────────────────────────────────────────
@@ -258,11 +273,24 @@ def load_json_safe(path: Path | None) -> tuple[dict | None, str | None]:
     if path is None or not path.exists():
         return None, None
     try:
-        return json.loads(path.read_text(encoding="utf-8")), None
-    except json.JSONDecodeError as e:
+        data = json.loads(read_json_text(path))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         return None, f"JSON parse error: {e}"
     except OSError as e:
         return None, f"read error: {e}"
+    docs = data.get("documents", []) if isinstance(data, dict) else None
+    if not isinstance(docs, list) or not all(isinstance(d, dict) for d in docs):
+        return None, "JSON 형식 오류: 최상위 객체와 documents 객체 목록이 필요합니다"
+    return data, None
+
+
+def read_json_text(path: Path) -> str:
+    """UTF-8(BOM 허용), 안 되면 CP949(Windows 메모장 ANSI)로 읽는다."""
+    raw = path.read_bytes()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp949")
 
 
 def _ao_cell(cell: dict, prefix: str = "") -> dict:
@@ -453,7 +481,10 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
         parsed["ao_ui"], ao_ui_err = load_json_safe(find_kind_file(bdir, "ao_ui", doc_id))
         if ao_ui_err:
             errors.append(f"ao_ui: {ao_ui_err}")
-        rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"], parsed["ao_ui"]) if parsed["golden"] else []
+        try:
+            rows = compare_bundle(parsed["golden"], parsed["ao_extract"], parsed["harness"], parsed["ao_ui"]) if parsed["golden"] else []
+        except Exception as e:  # 형식이 어긋난 JSON 하나가 번들 전체 조회를 막지 않게 한다
+            rows, errors = [], [*errors, f"compare: {e}"]
         sc = {"ao": score(rows, "ao") if parsed["golden"] else None,
               "harness": score(rows, "harness") if parsed["golden"] else None}
         cls = _classification(parsed)
@@ -620,21 +651,14 @@ def _validate_golden(data: Any) -> None:
     for doc in data["documents"]:
         if not isinstance(doc, dict):
             raise ApiError(422, "each document must be an object")
-        for c in doc.get("extracted_fields") or []:
-            if "key" not in c:
-                raise ApiError(422, "field cell missing 'key'")
+        cells = [*(doc.get("extracted_fields") or []),
+                 *(c for g in doc.get("extracted_groups") or [] if isinstance(g, dict) for c in g.get("fields") or []),
+                 *(c for t in doc.get("extracted_tables") or [] if isinstance(t, dict)
+                   for row in t.get("rows") or [] if isinstance(row, list) for c in row)]
+        for c in cells:
+            if not isinstance(c, dict) or "key" not in c:
+                raise ApiError(422, "cell must be an object with 'key'")
             c.setdefault("dtype", "string")
-        for g in doc.get("extracted_groups") or []:
-            for c in g.get("fields") or []:
-                if "key" not in c:
-                    raise ApiError(422, "group field cell missing 'key'")
-                c.setdefault("dtype", "string")
-        for t in doc.get("extracted_tables") or []:
-            for row in t.get("rows") or []:
-                for c in row:
-                    if "key" not in c:
-                        raise ApiError(422, "table cell missing 'key'")
-                    c.setdefault("dtype", "string")
 
 
 def save_golden(data_dir: Path, bundle_id: str, doc_id: str, data: Any) -> dict:
@@ -686,8 +710,12 @@ def get_image(data_dir: Path, bundle_id: str, doc_id: str, view: str, page: int)
     cdir.mkdir(parents=True, exist_ok=True)
     cached = cdir / f"{doc_id}.p{page}.png"
     if not cached.exists():
-        with Image.open(src) as im:
-            if ext in (".tif", ".tiff"):
-                im.seek(page - 1)
-            im.convert("RGB").save(cached, "PNG")
+        try:
+            with Image.open(src) as im:
+                if ext in (".tif", ".tiff"):
+                    im.seek(page - 1)
+                im.convert("RGB").save(cached, "PNG")
+        except Exception as e:
+            cached.unlink(missing_ok=True)
+            raise ApiError(422, f"이미지를 열 수 없습니다: {e}")
     return cached, n_pages

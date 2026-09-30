@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request
+from starlette.datastructures import UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -35,6 +36,15 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     app.state.data_dir = data_dir
     app.state.max_upload_bytes = max_mb * 1024 * 1024
 
+    async def json_body(request: Request) -> dict:
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            raise HTTPException(422, "JSON object body required")
+        return body
+
     def call(fn, *a, **kw):
         try:
             return fn(*a, **kw)
@@ -46,8 +56,13 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
         return {"ok": True}
 
     @app.post("/api/bundles", status_code=201)
-    async def upload_bundle(request: Request, files: list[UploadFile] = File(...),
-                             name: Optional[str] = Form(None)):
+    async def upload_bundle(request: Request):
+        # Starlette 기본 한도(파일 1000개)로는 200건 넘는 폴더 업로드가 막힌다
+        form = await request.form(max_files=100_000, max_fields=100_000)
+        files = [f for f in form.getlist("files") if isinstance(f, UploadFile)]
+        if not files:
+            raise HTTPException(422, "files required")
+        name = form.get("name") or None
         collected = [(f.filename, await f.read()) for f in files]
         bid = call(B.process_upload, data_dir, collected, name, request.app.state.max_upload_bytes)
         return call(B.bundle_view, data_dir, bid)
@@ -83,16 +98,16 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
         path = B.find_kind_file(bdir, kind, doc_id)
         if path is None:
             raise HTTPException(404, "not found")
-        return Response(content=path.read_text(encoding="utf-8"), media_type="application/json")
+        return Response(content=B.read_json_text(path), media_type="application/json")
 
     @app.post("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def post_golden(bundle_id: str, doc_id: str, request: Request):
-        body = await request.json()
+        body = await json_body(request)
         return call(B.create_golden, data_dir, bundle_id, doc_id, body.get("from", "empty"), body.get("doc_type"))
 
     @app.put("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def put_golden(bundle_id: str, doc_id: str, request: Request):
-        body = await request.json()
+        body = await json_body(request)
         return call(B.save_golden, data_dir, bundle_id, doc_id, body.get("golden"))
 
     @app.delete("/api/bundles/{bundle_id}/docs/{doc_id}/golden", status_code=204)
@@ -102,7 +117,7 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
 
     @app.put("/api/bundles/{bundle_id}/docs/{doc_id}/review", status_code=204)
     async def put_review(bundle_id: str, doc_id: str, request: Request):
-        body = await request.json()
+        body = await json_body(request)
         call(B.set_review, data_dir, bundle_id, doc_id, body.get("review", ""))
         return Response(status_code=204)
 

@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font, PatternFill
 
 from . import bundle as B
@@ -40,7 +41,7 @@ _OX = {True: "O", False: "X", None: ""}
 
 
 def _cell_val(v) -> str:
-    return "" if v is None else str(v)
+    return "" if v is None else ILLEGAL_CHARACTERS_RE.sub("", str(v))  # OCR 값의 제어문자는 xlsx에 쓸 수 없다
 
 
 def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None) -> bytes:

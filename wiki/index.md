@@ -15,6 +15,7 @@ status: active
 
 - [2026-09-29 문서 유형 필터와 편집 탭 표 다중 셀 일괄 입력](2026-09-29-doctype-filter-multicell.md)
 - [2026-09-30 전체 묶음 ZIP 내보내기](2026-09-30-bundle-export-zip.md)
+- [2026-09-30 한글 파일명 ZIP 인식과 업로드·조회 오류 전수 점검](2026-09-30-korean-filename-upload-hardening.md)
 - [2026-09-29 한글·공백·괄호 파일명 문서 400 오류 수정과 표본 205건 업로드](2026-09-29-unicode-doc-id.md)
 - [2026-09-29 편집 탭 불일치 강조와 Golden에 없는 키 ghost 행 표시](2026-09-29-editor-mismatch-viz.md)
 - [2026-09-28 번들 기반 Golden Set 관리 Web App](2026-09-28-bundle-golden-viewer.md)
