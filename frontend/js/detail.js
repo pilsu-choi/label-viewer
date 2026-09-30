@@ -313,7 +313,12 @@ export function renderDetail(root, bundleId, docId) {
     });
 
     compareApi = renderCompare(tabHosts.compare, doc, {
-      onAdopt: (entry, value) => { editor.adoptValue(entry, value); compareApi.markAdopted(entry.path, value); },
+      onAdopt: (entry, value) => {
+        const prev = editor.adoptValue(entry, value);
+        if (prev === undefined) return;
+        compareApi.markAdopted(entry.path, value);
+        toast(`${value === '' ? '빈 값을' : '값을'} Golden에 채택했습니다.`, 'info', { label: '되돌리기', onClick: () => { editor.adoptValue(entry, prev); compareApi.markAdopted(entry.path, prev); } });
+      },
       onHoverBbox,
       onGoToEdit: () => setTab('edit'),
     });

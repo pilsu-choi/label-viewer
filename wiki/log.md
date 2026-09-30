@@ -125,3 +125,9 @@ status: active
 
 ### Update
 - [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): dev `01c2fb9` 기준 번들 `0.1.0-20260930-01c2fb9` 재빌드, NAS 동기화 경로로 위치 변경, 이전 번들 `a047041` 삭제.
+
+### Creation
+- [비교 탭 채택 오클릭 방지·되돌리기·빈 값 채택](2026-09-30-compare-adopt-ux.md): 값 칸 클릭은 근거 고정, 채택은 별도 버튼·팝오버 버튼, 되돌리기 토스트, 누락 값 `''` 채택.
+
+### Update
+- [Label Viewer 비교 탭 사용성 개선](2026-09-29-compare-tab-usability.md): 값 칸 자체가 채택 버튼이던 방식은 위 문서로 대체.

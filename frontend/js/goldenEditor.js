@@ -47,8 +47,10 @@ function findOrPush(arr, key, make) {
   return it;
 }
 
-// compare 엔트리(doc/area/container/row/key)를 이용해 golden 값을 채택한다. 없는 위치면 만든다.
+// compare 엔트리(doc/area/container/row/key)를 이용해 golden 값을 채택한다. 없는 위치면 만든다. 채택 전 값을 돌려준다(되돌리기용, 새 칸은 '').
 function applyAdopt(golden, entry, value) {
+  let prev;
+  const set = (cell) => { prev = cell.value ?? ''; cell.value = value; };
   if (!golden.documents) golden.documents = [];
   while (golden.documents.length <= entry.doc) golden.documents.push({ doc_type: '', extracted_fields: [], extracted_groups: [], extracted_tables: [] });
   const d = golden.documents[entry.doc];
@@ -56,12 +58,12 @@ function applyAdopt(golden, entry, value) {
   const dtype = entry.dtype || 'string';
   if (entry.area === 'field') {
     const cell = findOrPush(d.extracted_fields, entry.key, () => ({ key: entry.key, value: '', dtype }));
-    cell.value = value;
+    set(cell);
   } else if (entry.area === 'group') {
     const g = findOrPush(d.extracted_groups, entry.container, () => ({ key: entry.container, fields: [] }));
     g.fields = g.fields || [];
     const cell = findOrPush(g.fields, entry.key, () => ({ key: entry.key, value: '', dtype }));
-    cell.value = value;
+    set(cell);
   } else if (entry.area === 'table') {
     const t = findOrPush(d.extracted_tables, entry.container, () => ({ key: entry.container, headers: [], rows: [] }));
     t.headers = t.headers || []; t.rows = t.rows || [];
@@ -72,8 +74,9 @@ function applyAdopt(golden, entry, value) {
     const row = t.rows[rowIdx];
     while (row.length < t.headers.length) row.push({ key: t.headers[row.length], value: '', dtype: 'string' });
     if (!row[colIdx]) row[colIdx] = { key: entry.key, value: '', dtype };
-    row[colIdx].value = value;
+    set(row[colIdx]);
   }
+  return prev;
 }
 
 export function createGoldenEditor(host, opts) {
@@ -318,10 +321,10 @@ export function createGoldenEditor(host, opts) {
     const showStat = !!(status && status !== 'MATCH');
     const content = entry
       ? el('button', {
-          class: `gs-chip ${kindState ? `st-${kindState}` : ''}`.trim(), type: 'button', disabled: !available,
-          title: available ? `${label} 값을 Golden에 채택` : `${label} 값 없음`,
+          class: `gs-chip ${kindState ? `st-${kindState}` : ''}`.trim(), type: 'button',
+          title: available ? `${label} 값을 Golden에 채택` : `${label} 빈 값을 Golden에 채택`,
           onclick: () => {
-            applyAdopt(golden, entry, value); markDirty();
+            applyAdopt(golden, entry, value ?? ''); markDirty();
             const find = refocus || ((h) => Array.from(h.querySelectorAll('.field-row')).find((r) => r.dataset.path === path));
             rerenderAt(find, null, !!refocus);
           },
@@ -657,9 +660,10 @@ export function createGoldenEditor(host, opts) {
     adoptValue: (entry, value) => {
       if (!doc.golden) { toast('먼저 Golden Set을 생성하세요.', 'error'); return; }
       if (golden == null) golden = structuredClone(doc.golden);
-      applyAdopt(golden, entry, value);
+      const prev = applyAdopt(golden, entry, value);
       markDirty();
       if (!advanced) render();
+      return prev;
     },
     destroy: () => { debouncedSave.cancel(); updateSummaryLater.cancel(); hideTip(); },
   };

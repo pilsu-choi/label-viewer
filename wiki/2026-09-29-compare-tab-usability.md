@@ -41,7 +41,7 @@ status: active
 ### 공간과 기본값
 - 필터 순서는 `불일치 전체 · 불일치 · 누락 · 추가 · 전체`이고 기본은 불일치 전체다(`lv.cmpFilter`). `flashPath`는 대상이 현재 필터에 없을 때만 필터를 바꾼다.
 - 점수는 한 줄 요약(`scoreMini`)으로 두고 누르면 상세 카드를 펼친다(`lv.cmpScoreExpanded`).
-- 채택 열을 제거했다. AO·Harness 값 칸 자체가 `.gs-chip` 채택 버튼이다(`valueCell`). Golden이 비었으면 문자 diff 없이 중립색으로 보인다.
+- 채택 열을 제거했다. AO·Harness 값 칸 자체가 `.gs-chip` 채택 버튼이다(`valueCell`). Golden이 비었으면 문자 diff 없이 중립색으로 보인다. (2026-09-30 [채택 오클릭 방지](2026-09-30-compare-adopt-ux.md)에서 값 칸은 근거 고정, 채택은 별도 버튼으로 바뀜)
 - 항목 열은 한 줄 말줄임과 title, 값은 공백 기준으로 줄바꿈한다.
 - 1600×900 가시 행: DET-001 12행, INP-001 11행(그룹 헤더가 많음).
 
