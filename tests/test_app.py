@@ -376,6 +376,26 @@ def test_unicode_doc_id(client: TestClient):
     assert client.get(f"/api/bundles/{bid}/docs/{quote(doc_id)}/image").status_code == 200
 
 
+def test_korean_zip_names(client: TestClient):
+    """Windows 압축(CP949, UTF-8 플래그 없음)과 macOS NFD 파일명도 한글 폴더·문서 ID로 읽는다."""
+    import unicodedata
+    golden = json.dumps({"documents": []}).encode()
+    items = [("원본/진단서 1.png", _png()), ("정답/진단서 1.json", golden)]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:  # ASCII 자리표시자로 쓴 뒤 CP949 바이트로 바꿔 UTF-8 플래그 없는 이름을 만든다
+        for i, (name, data) in enumerate(items):
+            zf.writestr(f"{i}".ljust(len(name.encode("cp949")), "_"), data)
+        zf.writestr(unicodedata.normalize("NFD", "harness/진단서 1.harness.json"), golden)
+    raw = buf.getvalue()
+    for i, (name, _) in enumerate(items):
+        raw = raw.replace(f"{i}".ljust(len(name.encode("cp949")), "_").encode(), name.encode("cp949"))
+    buf = io.BytesIO(raw)
+    bid = client.post("/api/bundles", files=[("files", ("b.zip", buf.getvalue(), "application/zip"))]).json()["id"]
+    [doc] = client.get(f"/api/bundles/{bid}").json()["docs"]
+    assert doc["id"] == "진단서 1"
+    assert all(doc["has"][k] for k in ("original", "golden", "harness"))
+
+
 def _png() -> bytes:
     from PIL import Image
     buf = io.BytesIO()

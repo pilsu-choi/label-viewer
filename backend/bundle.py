@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import shutil
+import unicodedata
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -145,13 +146,26 @@ def save_state(bdir: Path, state: dict) -> None:
 
 # ── 업로드 ────────────────────────────────────────────────────────────────
 
+def _zip_name(info: zipfile.ZipInfo) -> str:
+    """UTF-8 플래그 없는 항목은 cp437로 읽히므로 원래 바이트를 UTF-8, 안 되면 CP949(Windows 압축)로 다시 읽는다."""
+    if info.flag_bits & 0x800:
+        return info.filename
+    raw = info.filename.encode("cp437")
+    for enc in ("utf-8", "cp949"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return info.filename
+
+
 def _iter_zip(fp: BinaryIO) -> list[tuple[str, bytes]]:
     out = []
     with zipfile.ZipFile(fp) as zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
-            name = info.filename
+            name = _zip_name(info)
             norm = PurePosixPath(name)
             if norm.is_absolute() or ".." in norm.parts:
                 continue  # zip slip 방지
@@ -174,6 +188,8 @@ def process_upload(data_dir: Path, files: list[tuple[str, bytes]], name: str | N
         bundle_name = name or (PurePosixPath(files[0][0]).parts[0] if files and len(files[0][0].split("/")) > 1
                                 else "bundle")
 
+    # macOS NFD 파일명을 NFC로 맞춰 폴더 키 인식과 다른 출처 파일과의 문서 매칭을 보장한다
+    entries = [(unicodedata.normalize("NFC", relpath), data) for relpath, data in entries]
     kinds = {classify(relpath) for relpath, _ in entries}
     if not kinds.intersection(DOC_KINDS):
         if "ao_ui" in kinds:
