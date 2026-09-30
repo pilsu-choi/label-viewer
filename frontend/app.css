@@ -721,10 +721,13 @@ select.fr-dtype {
 .cmp-key { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .cmp-row { flex: none; margin-right: 6px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
 .cmp-val { overflow-wrap: break-word; }
-.cmp-cell { display: flex; align-items: center; justify-content: space-between; gap: 2px var(--sp-2); flex-wrap: wrap; }
+.cmp-cell { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--sp-2); }
+/* 상태 배지는 가장 긴 라벨(형식오류) 폭으로 고정해 열마다 같은 위치에 둔다 */
+.cmp-cell > .badge { width: 5em; padding: 0 4px; justify-content: center; }
 .diff-add { padding: 0 1px; border-radius: var(--r-sm); background: var(--bad-soft); color: var(--bad); font-weight: 600; }
 /* 채택 버튼: 행 hover/포커스/근거 고정 때만 보인다(값 클릭은 근거 팝오버 고정) */
-.cmp-adopt { flex: none; margin-left: auto; visibility: hidden; }
+/* 자리를 차지하지 않도록 셀 오른쪽에 겹쳐 띄운다 */
+.cmp-cell .cmp-adopt { position: absolute; top: 50%; right: 0; transform: translateY(-50%); visibility: hidden; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
 .cmp-table tr:hover .cmp-adopt, .cmp-table tr:focus-within .cmp-adopt, .cmp-table tr:focus .cmp-adopt, .cmp-table tr.is-pinned .cmp-adopt { visibility: visible; }
 
 .evidence-pop {

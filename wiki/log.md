@@ -131,3 +131,6 @@ status: active
 
 ### Update
 - [Label Viewer 비교 탭 사용성 개선](2026-09-29-compare-tab-usability.md): 값 칸 자체가 채택 버튼이던 방식은 위 문서로 대체.
+
+### Update
+- [비교 탭 채택 오클릭 방지·되돌리기·빈 값 채택](2026-09-30-compare-adopt-ux.md): 상태 배지를 셀 앞 고정 폭 칸으로 옮겨 위치를 통일하고, 채택 버튼을 겹쳐 띄우는 후속 수정 추가.
