@@ -286,10 +286,11 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
         # 정답에 없는 필드: key 로 AO·Harness 를 한 줄로 묶는다
         extra: dict[str, list] = {}
         for i, (idx, consumed) in enumerate(((ai, consumed_a), (hi, consumed_h))):
+            cell_group = {id(c): gk for gk, cells in idx.groups.items() for c in cells.values()}
             for key, cell in idx.by_key.items():
                 if id(cell) in consumed or key in idx.tables:
                     continue
-                group = next((gk for gk, cells in idx.groups.items() if cells.get(key) is cell), None)
+                group = cell_group.get(id(cell))
                 extra.setdefault(key, [group, None, None])[i + 1] = cell
         for key, (group, acell, hcell) in extra.items():
             dtype = (acell or hcell).get("dtype") or "string"

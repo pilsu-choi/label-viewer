@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import mimetypes
 import os
 from pathlib import Path
@@ -10,7 +11,8 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from starlette.datastructures import UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle as B
@@ -18,13 +20,38 @@ from . import export as E
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 NO_CACHE = {"Cache-Control": "no-cache"}  # 배포 뒤 예전 JS 모듈을 쓰지 않도록 매번 재검증
+IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}  # 버전 경로 정적 파일
+IMAGE_CACHE = {"Cache-Control": "private, max-age=86400"}
 
 
-class NoCacheStatic(StaticFiles):
+class HeaderStatic(StaticFiles):
+    def __init__(self, *args, headers: dict, **kw):
+        super().__init__(*args, **kw)
+        self.headers = headers
+
     async def get_response(self, path, scope):
         resp = await super().get_response(path, scope)
-        resp.headers.update(NO_CACHE)
+        resp.headers.update(self.headers)
         return resp
+
+
+class TextGZip(GZipMiddleware):
+    """이미지·내보내기(ZIP·XLSX)는 이미 압축돼 있어 건너뛴다."""
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "")
+        if path.endswith("/image") or "/export/" in path:
+            return await self.app(scope, receive, send)
+        await super().__call__(scope, receive, send)
+
+
+def _static_version() -> str:
+    """프론트 파일 경로·mtime·크기 해시. 파일이 바뀌면 /static/{ver} URL 이 바뀐다."""
+    h = hashlib.sha1()
+    for p in sorted(FRONTEND_DIR.rglob("*")):
+        if p.is_file():
+            st = p.stat()
+            h.update(f"{p.relative_to(FRONTEND_DIR)}{st.st_mtime_ns}{st.st_size}".encode())
+    return h.hexdigest()[:10]
 
 
 def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
@@ -33,6 +60,7 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     max_mb = max_upload_mb or int(os.environ.get("LABEL_VIEWER_MAX_UPLOAD_MB", "2048"))
 
     app = FastAPI(title="Label Viewer")
+    app.add_middleware(TextGZip, minimum_size=1024, compresslevel=6)
     app.state.data_dir = data_dir
     app.state.max_upload_bytes = max_mb * 1024 * 1024
 
@@ -85,10 +113,11 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
         return call(B.doc_detail, data_dir, bundle_id, doc_id)
 
     @app.get("/api/bundles/{bundle_id}/docs/{doc_id}/image")
-    def get_image(bundle_id: str, doc_id: str, view: str = "original", page: int = 1):
-        path, n_pages = call(B.get_image, data_dir, bundle_id, doc_id, view, page)
+    def get_image(bundle_id: str, doc_id: str, view: str = "original", page: int = 1,
+                  w: Optional[int] = None):
+        path, n_pages = call(B.get_image, data_dir, bundle_id, doc_id, view, page, w)
         media = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-        return FileResponse(path, media_type=media, headers={"X-Pages": str(n_pages)})
+        return FileResponse(path, media_type=media, headers={"X-Pages": str(n_pages), **IMAGE_CACHE})
 
     @app.get("/api/bundles/{bundle_id}/docs/{doc_id}/raw/{kind}")
     def get_raw(bundle_id: str, doc_id: str, kind: str):
@@ -136,16 +165,24 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
                          headers={"Content-Disposition": f'attachment; filename="{bundle_id}-golden.xlsx"'})
 
     if FRONTEND_DIR.is_dir():
-        app.mount("/static", NoCacheStatic(directory=str(FRONTEND_DIR)), name="static")
-
-    @app.get("/")
-    def index():
+        ver = _static_version()
+        for prefix, headers in ((f"/static/{ver}", IMMUTABLE), ("/static", NO_CACHE)):  # 구버전 탭용 /static 도 유지
+            app.mount(prefix, HeaderStatic(directory=str(FRONTEND_DIR), headers=headers), name=prefix)
         idx = FRONTEND_DIR / "index.html"
-        if idx.exists():
-            return FileResponse(idx, headers=NO_CACHE)
-        raise HTTPException(404, "frontend not built")
+        html = idx.read_text(encoding="utf-8").replace('"/static/', f'"/static/{ver}/') if idx.exists() else None
+
+        @app.get("/")
+        def index():
+            if html is None:
+                raise HTTPException(404, "frontend not built")
+            return HTMLResponse(html, headers=NO_CACHE)
 
     return app
+
+
+def app_from_env() -> FastAPI:
+    """다중 워커용 uvicorn 팩토리(import string)."""
+    return create_app(Path(os.environ["LABEL_VIEWER_DATA"]))
 
 
 def main() -> None:
@@ -153,11 +190,12 @@ def main() -> None:
     parser.add_argument("--data", default=os.environ.get("LABEL_VIEWER_DATA", "./storage"))
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--workers", type=int, default=int(os.environ.get("LABEL_VIEWER_WORKERS", "2")))
     args = parser.parse_args()
 
     import uvicorn
-    app = create_app(Path(args.data))
-    uvicorn.run(app, host=args.host, port=args.port)
+    os.environ["LABEL_VIEWER_DATA"] = args.data
+    uvicorn.run("backend.app:app_from_env", factory=True, host=args.host, port=args.port, workers=args.workers)
 
 
 if __name__ == "__main__":

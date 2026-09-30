@@ -108,7 +108,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   });
   resizeObserver.observe(stage);
 
-  let panning = false, lastX = 0, lastY = 0;
+  let panning = false, lastX = 0, lastY = 0, panRAF = null, loadSeq = 0;
   const onMouseDown = (e) => {
     if (e.button !== 0) return;
     panning = true; lastX = e.clientX; lastY = e.clientY;
@@ -119,7 +119,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
     fitMode = 'manual';
     tx += e.clientX - lastX; ty += e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
-    apply();
+    if (!panRAF) panRAF = requestAnimationFrame(() => { panRAF = null; apply(); }); // 프레임당 한 번만 그린다
   };
   const onMouseUp = () => { panning = false; stage.classList.remove('panning'); };
   const onWheel = (e) => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); };
@@ -128,11 +128,14 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   window.addEventListener('mouseup', onMouseUp);
   stage.addEventListener('wheel', onWheel, { passive: false });
 
+  // 빠른 이전/다음 이동 시 늦게 도착한 이전 요청은 무시한다(loadSeq).
   function load(url) {
+    const seq = ++loadSeq;
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.alt = '';
       img.onload = () => {
+        if (seq !== loadSeq) return resolve(null);
         natW = img.naturalWidth; natH = img.naturalHeight;
         canvas.style.width = natW + 'px'; canvas.style.height = natH + 'px';
         bboxLayer.style.width = natW + 'px'; bboxLayer.style.height = natH + 'px';
@@ -146,7 +149,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
         setBoxes(pendingBoxes);
         resolve({ width: natW, height: natH });
       };
-      img.onerror = () => reject(new Error('이미지를 불러오지 못했습니다.'));
+      img.onerror = () => seq === loadSeq ? reject(new Error('이미지를 불러오지 못했습니다.')) : resolve(null);
       img.src = url;
     });
   }
@@ -212,6 +215,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   }
 
   function empty(message) {
+    loadSeq++;
     natW = 0; natH = 0;
     focusView = null;
     pendingBoxes = [];
@@ -231,6 +235,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
     destroy: () => {
       resizeObserver.disconnect();
       if (resizeRAF) cancelAnimationFrame(resizeRAF);
+      if (panRAF) cancelAnimationFrame(panRAF);
       window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('mousemove', onMmMove); window.removeEventListener('mouseup', onMmUp);
     },

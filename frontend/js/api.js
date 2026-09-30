@@ -18,13 +18,23 @@ async function req(method, url, body) {
   return res.json();
 }
 
+// 문서 간 이동마다 번들 목록을 다시 받지 않도록 마지막 번들만 기억한다. fresh 면 새로 받는다.
+let bundleCache = null;
+
 export const api = {
   listBundles: () => req('GET', '/api/bundles'),
-  getBundle: (id) => req('GET', `/api/bundles/${encodeURIComponent(id)}`),
-  deleteBundle: (id) => req('DELETE', `/api/bundles/${encodeURIComponent(id)}`),
+  getBundle(id, fresh) {
+    if (fresh || bundleCache?.id !== id) {
+      const p = req('GET', `/api/bundles/${encodeURIComponent(id)}`);
+      bundleCache = { id, p };
+      p.catch(() => { if (bundleCache?.p === p) bundleCache = null; });
+    }
+    return bundleCache.p;
+  },
+  deleteBundle: (id) => { bundleCache = null; return req('DELETE', `/api/bundles/${encodeURIComponent(id)}`); },
   getDoc: (bundleId, docId) => req('GET', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}`),
-  imageUrl: (bundleId, docId, view, page) =>
-    `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/image?view=${view}&page=${page || 1}`,
+  imageUrl: (bundleId, docId, view, page, w) =>
+    `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/image?view=${view}&page=${page || 1}${w ? `&w=${w}` : ''}`,
   rawUrl: (bundleId, docId, kind) =>
     `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/raw/${kind}`,
   getRaw: (bundleId, docId, kind) => fetch(`/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/raw/${kind}`)

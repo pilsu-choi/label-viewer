@@ -5,6 +5,7 @@ export function createJsonViewer(host) {
   let data = null, raw = '', mode = 'message', query = '', selectedPath = null;
   const openState = new Map();
   let forceAll = null;
+  let hitCache = new WeakMap(), hitQuery = null; // 객체별 하위 일치 수(검색어가 바뀔 때만 비운다)
 
   const search = el('input', { class: 'json-search', type: 'search', placeholder: '키 또는 값 검색', 'aria-label': 'JSON 검색', oninput: debounce(onSearch, 120) });
   const count = el('span', { class: 'json-count' });
@@ -25,9 +26,12 @@ export function createJsonViewer(host) {
 
   function matchCount(value, key, q) {
     const isObj = value && typeof value === 'object';
+    if (q !== hitQuery) { hitCache = new WeakMap(); hitQuery = q; }
     let n = String(key).toLowerCase().includes(q) ? 1 : 0;
-    if (isObj) for (const [k, v] of Object.entries(value)) n += matchCount(v, k, q);
-    else if (!n && String(value).toLowerCase().includes(q)) n = 1;
+    if (isObj) {
+      if (!hitCache.has(value)) hitCache.set(value, Object.entries(value).reduce((s, [k, v]) => s + matchCount(v, k, q), 0));
+      n += hitCache.get(value);
+    } else if (!n && String(value).toLowerCase().includes(q)) n = 1;
     return n;
   }
 
@@ -128,7 +132,7 @@ export function createJsonViewer(host) {
 
   return {
     show(text) {
-      search.value = ''; query = ''; selectedPath = null; openState.clear(); forceAll = null;
+      search.value = ''; query = ''; selectedPath = null; openState.clear(); forceAll = null; hitQuery = null;
       try { data = JSON.parse(text); raw = JSON.stringify(data, null, 2); drawTree(); }
       catch (e) { data = null; raw = text; renderEmpty('alert-triangle', 'JSON 형식 오류', e.message, text); }
     },
