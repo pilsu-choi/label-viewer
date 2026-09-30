@@ -62,7 +62,7 @@ function entryLocation(entry) {
 // 표 항목의 행 소그룹 키. 그룹(area+container)과 행 번호로 정한다.
 function rowKeyOf(e) { return `${e.area}::${e.container || ''}::${e.row}`; }
 
-// AO/Harness 값 셀: 값 + 상태 배지, 그리고 행 hover/포커스/고정 때만 보이는 별도 [채택] 버튼(빈 값도 '' 로 채택 가능).
+// AO/Harness 값 셀: 상태 배지(고정 폭 앞 칸이라 값 길이와 무관하게 위치가 맞는다) + 값, 그리고 행 hover/포커스/고정 때만 보이는 별도 [채택] 버튼(빈 값도 '' 로 채택 가능).
 // 셀 자체는 버튼이 아니므로 클릭하면 행의 근거 팝오버 고정으로 이어진다.
 // Golden 이 비어 있으면(EXTRA 성격) 빈 문자열과의 문자 diff 로 전체가 빨갛게 보이지 않도록 diff 없이 중립색으로 보여준다.
 // 채택할 값: 비어 있는 소스는 '' (백엔드가 ''==None 으로 보므로 Golden '' vs 누락 소스는 MATCH).
@@ -73,7 +73,7 @@ function valueCell(kind, label, e, goldenVal, onAdopt) {
   const status = e[`${kind}_status`];
   const goldenEmpty = goldenVal == null || goldenVal === '';
   const valSpan = goldenEmpty ? el('span', { class: 'cmp-val' }, value == null || value === '' ? '—' : String(value)) : diffSpan(goldenVal, value);
-  const body = [valSpan, statusBadge(status)];
+  const body = [statusBadge(status), valSpan];
   if (onAdopt) {
     const tip = `${label} ${adoptable(value) === '' ? '빈 ' : ''}값을 Golden에 채택`;
     body.push(el('button', {
@@ -284,7 +284,7 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
     const e = { ao_status: st('ao'), harness_status: st('harness') };
     if (state.search.trim() || !matchesFilter(e, state.filter, state.source)) return null;
     const by = doc.doc_type_by_source || {};
-    const cell = (k) => el('td', {}, el('div', { class: 'cmp-cell' }, [el('span', { class: 'cmp-val' }, by[k] || '—'), statusBadge(e[`${k}_status`])]));
+    const cell = (k) => el('td', {}, el('div', { class: 'cmp-cell' }, [statusBadge(e[`${k}_status`]), el('span', { class: 'cmp-val' }, by[k] || '—')]));
     return el('tr', { class: `cmp-doctype ${[e.ao_status, e.harness_status].includes('MISMATCH') ? 'bad' : ''}`.trim(), title: "문서 종류는 편집 탭의 '문서 유형'에서 바꿉니다" }, [
       el('td', {}, el('span', { class: 'cmp-key' }, '문서 유형')),
       el('td', {}, el('span', { class: 'cmp-val' }, by.golden || '—')),
