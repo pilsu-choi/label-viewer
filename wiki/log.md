@@ -104,3 +104,6 @@ status: active
 
 ### Creation
 - [전체 묶음 ZIP 내보내기](2026-09-30-bundle-export-zip.md): 목록·상세 화면 내보내기를 원본·전처리 이미지와 AO·Harness·Golden JSON 전체 묶음 ZIP으로 변경.
+
+### Update
+- [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `33fce14` 재배포(전체 묶음 ZIP 내보내기) 이력 추가.
