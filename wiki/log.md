@@ -137,3 +137,4 @@ status: active
 
 ### Update
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `9f77944` 재배포(비교 탭 채택 UX·배지 위치) 이력 추가.
+- [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): dev `b7a3a2f` 기준 번들 `0.1.0-20260930-b7a3a2f` 재빌드, 이전 번들 `01c2fb9` 삭제.
