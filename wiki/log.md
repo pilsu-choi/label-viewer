@@ -134,3 +134,6 @@ status: active
 
 ### Update
 - [비교 탭 채택 오클릭 방지·되돌리기·빈 값 채택](2026-09-30-compare-adopt-ux.md): 상태 배지를 셀 앞 고정 폭 칸으로 옮겨 위치를 통일하고, 채택 버튼을 겹쳐 띄우는 후속 수정 추가.
+
+### Update
+- [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `9f77944` 재배포(비교 탭 채택 UX·배지 위치) 이력 추가.
