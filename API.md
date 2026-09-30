@@ -159,8 +159,8 @@ kind = `ao_extract|ao_ui|harness|golden`. 파일 그대로(파싱 실패여도 �
 ### PUT /api/bundles/{id}/docs/{doc_id}/review  `{"review":"done|progress|"}`
 `_state.json` 갱신. 204.
 
-### GET /api/bundles/{id}/export/golden.zip
-`golden/*.json` 을 묶은 ZIP.
+### GET /api/bundles/{id}/export/bundle.zip[?doc={doc_id}]
+`original/`·`preprocessed/`·`ao_extract/`·`harness/`·`golden/`·`ao_ui/` 파일을 저장 폴더 구조 그대로 묶은 ZIP. 그대로 다시 업로드할 수 있다. `doc` 이 있으면 그 문서 파일만.
 
 ### GET /api/bundles/{id}/export/golden.xlsx[?doc={doc_id}]
 openpyxl. 시트:

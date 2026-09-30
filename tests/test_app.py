@@ -292,11 +292,17 @@ def test_review_state(client: TestClient, bundle: dict):
 
 def test_export_zip(client: TestClient, bundle: dict):
     bid = bundle["id"]
-    r = client.get(f"/api/bundles/{bid}/export/golden.zip")
+    r = client.get(f"/api/bundles/{bid}/export/bundle.zip")
     assert r.status_code == 200
     with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
         names = zf.namelist()
-    assert any(n.endswith("MC001.json") for n in names)
+    assert "golden/MC001.json" in names
+    assert {n.split("/")[0] for n in names} >= {"original", "ao_extract", "harness", "golden"}
+
+    r = client.get(f"/api/bundles/{bid}/export/bundle.zip", params={"doc": "MC001"})
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        names = zf.namelist()
+    assert names and all(n.split("/")[1].startswith("MC001.") for n in names)
 
 
 def test_export_xlsx(client: TestClient, bundle: dict):

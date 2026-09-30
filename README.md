@@ -2,7 +2,7 @@
 
 보험 OCR 결과(AO Extract·Harness)를 검수하고 정답지(Golden Set)를 만들고·고치고·비교·채점하는 독립 Web App이다. DB는 쓰지 않는다. 번들 폴더의 파일이 원본 데이터이고, 정답지도 JSON 파일로 저장한다.
 
-흐름: 번들 업로드(폴더/ZIP) → 파일명 기준 자동 매칭 → 이미지 목록 → 정답지 생성·수정 → Golden/AO/Harness 비교 → 채점 → JSON/Excel 내보내기
+흐름: 번들 업로드(폴더/ZIP) → 파일명 기준 자동 매칭 → 이미지 목록 → 정답지 생성·수정 → Golden/AO/Harness 비교 → 채점 → 전체 묶음 ZIP/Excel 내보내기
 
 ## 실행
 

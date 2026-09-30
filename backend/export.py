@@ -1,4 +1,4 @@
-"""Golden Set 내보내기: ZIP, Excel."""
+"""번들 내보내기: 전체 묶음 ZIP, Golden Excel."""
 from __future__ import annotations
 
 import io
@@ -19,16 +19,20 @@ _STATUS_FILL = {
 }
 
 
-def export_golden_zip(data_dir: Path, bundle_id: str) -> bytes:
+def export_bundle_zip(data_dir: Path, bundle_id: str, doc_id: str | None = None) -> bytes:
+    """원본·전처리 이미지와 AO·Harness·Golden JSON을 업로드 폴더 구조 그대로 묶는다. doc_id가 있으면 그 문서만."""
     bdir = B.bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
         raise B.ApiError(404, "bundle not found")
     buf = io.BytesIO()
-    gdir = bdir / "golden"
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        if gdir.is_dir():
-            for p in sorted(gdir.glob("*.json")):
-                zf.write(p, arcname=f"golden/{p.name}")
+        for kind in (*B.DOC_KINDS, "ao_ui"):
+            d = bdir / kind
+            if not d.is_dir():
+                continue
+            for p in sorted(d.iterdir()):
+                if p.is_file() and not p.name.startswith(".") and (doc_id is None or p.stem == doc_id):
+                    zf.write(p, arcname=f"{kind}/{p.name}")
     return buf.getvalue()
 
 

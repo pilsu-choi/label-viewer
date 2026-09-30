@@ -37,7 +37,8 @@ export const api = {
     req('DELETE', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`),
   putReview: (bundleId, docId, review) =>
     req('PUT', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/review`, { review }),
-  exportGoldenZipUrl: (bundleId) => `/api/bundles/${encodeURIComponent(bundleId)}/export/golden.zip`,
+  exportBundleZipUrl: (bundleId, docId) =>
+    `/api/bundles/${encodeURIComponent(bundleId)}/export/bundle.zip${docId ? `?doc=${encodeURIComponent(docId)}` : ''}`,
   exportGoldenXlsxUrl: (bundleId, docId) =>
     `/api/bundles/${encodeURIComponent(bundleId)}/export/golden.xlsx${docId ? `?doc=${encodeURIComponent(docId)}` : ''}`,
 

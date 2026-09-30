@@ -214,15 +214,9 @@ export function renderDetail(root, bundleId, docId) {
 
   function exportMenu() {
     return menuButton('내보내기', [
-      el('button', { onclick: () => {
-        const g = (editor && editor.getGoldenObject()) || doc.golden;
-        if (!g) { toast('Golden Set이 없습니다.', 'error'); return; }
-        const blob = new Blob([JSON.stringify(g, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = el('a', { href: url, download: `${docId}.json` });
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-      } }, [el('b', {}, 'Golden JSON'), el('span', {}, '이 문서의 정답지')]),
+      el('a', { href: api.exportBundleZipUrl(bundleId, docId), onclick: (e) => {
+        if (editor && editor.isDirty()) { e.preventDefault(); toast('저장하지 않은 Golden 변경이 있습니다. 저장 후 내보내세요.', 'error'); }
+      } }, [el('b', {}, '전체 묶음 ZIP'), el('span', {}, '이 문서의 원본·전처리 이미지, AO·Harness·Golden JSON')]),
       el('a', { href: api.exportGoldenXlsxUrl(bundleId, docId) }, [el('b', {}, 'Excel'), el('span', {}, '이 문서의 비교·채점 결과')]),
     ]);
   }

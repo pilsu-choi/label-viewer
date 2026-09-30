@@ -99,3 +99,8 @@ status: active
 
 ### Update
 - [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): dev `d5aba7e` 기준 번들 `0.1.0-20260930-d5aba7e` 재빌드, 반입 이력 표 추가.
+
+## 2026-09-30
+
+### Creation
+- [전체 묶음 ZIP 내보내기](2026-09-30-bundle-export-zip.md): 목록·상세 화면 내보내기를 원본·전처리 이미지와 AO·Harness·Golden JSON 전체 묶음 ZIP으로 변경.
