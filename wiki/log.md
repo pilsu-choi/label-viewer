@@ -119,3 +119,6 @@ status: active
 
 ### Creation
 - [화면 로드·편집 성능 최적화](2026-09-30-performance-optimization.md): GZip·정적 파일 버전 캐시·썸네일, 파일 시그니처 캐시, 편집 중 재구성·요약 디바운스, 다중 워커.
+
+### Update
+- [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `8f54242` 재배포(성능 최적화) 이력 추가.
