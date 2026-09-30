@@ -122,3 +122,6 @@ status: active
 
 ### Update
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `8f54242` 재배포(성능 최적화) 이력 추가.
+
+### Update
+- [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): dev `01c2fb9` 기준 번들 `0.1.0-20260930-01c2fb9` 재빌드, NAS 동기화 경로로 위치 변경, 이전 번들 `a047041` 삭제.
