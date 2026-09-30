@@ -107,3 +107,6 @@ status: active
 
 ### Update
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `33fce14` 재배포(전체 묶음 ZIP 내보내기) 이력 추가.
+
+### Creation
+- [한글 파일명 ZIP 인식과 업로드·조회 오류 전수 점검](2026-09-30-korean-filename-upload-hardening.md): CP949·NFD 파일명 인식, JSON 인코딩·형식 오류 격리, 1000개 초과 업로드, 잡파일·긴 파일명·손상 입력 500 수정.

@@ -493,3 +493,32 @@ def test_classification_grading(client: TestClient):
     assert rows["BAD"][2:4] == ("X", "O") and rows["OK"][2:4] == ("O", "O")
     assert rows["NOGOLD"][2:4] in (("", ""), (None, None))
     assert rows["합계"][5] == 0 and rows["합계"][6] == 1  # AO: BAD 제외 → OK 의 MATCH 0 / MISMATCH 1
+
+
+def test_upload_hardening(client: TestClient):
+    """전수조사에서 500을 내던 입력: 인코딩·형식이 어긋난 JSON, 잡파일, 손상 ZIP, 긴 파일명, 제어문자, '..' ID."""
+    g = {"documents": [{"doc_type": "진단서", "extracted_fields": [{"key": "성명", "value": "홍\x0b길동"}],
+                        "extracted_groups": [], "extracted_tables": []}]}
+    files = [("files", ("b/original/a..b.png", _png(), "image/png")),
+             ("files", ("b/golden/a..b.json", b"\xef\xbb\xbf" + json.dumps(g, ensure_ascii=False).encode(), "application/json")),
+             ("files", ("b/harness/a..b.json", json.dumps({"documents": [{"doc_type": "진단서"}]}, ensure_ascii=False).encode("cp949"), "application/json")),
+             ("files", ("b/ao_extract/a..b.json", b"[1, 2]", "application/json")),
+             ("files", ("b/harness/Thumbs.db", b"\x00\xff\xfe", "application/octet-stream"))]
+    bid = client.post("/api/bundles", files=files).json()["id"]
+    [doc] = client.get(f"/api/bundles/{bid}").json()["docs"]
+    assert doc["id"] == "a..b" and doc["has"]["golden"] and doc["has"]["harness"]
+    assert [e.split(":")[0] for e in doc["errors"]] == ["ao_extract"]
+    assert client.get("/api/bundles").status_code == 200
+    assert client.get(f"/api/bundles/{bid}/docs/a..b").status_code == 200
+    assert client.get(f"/api/bundles/{bid}/docs/a..b/raw/harness").json()["documents"][0]["doc_type"] == "진단서"
+    assert client.get(f"/api/bundles/{bid}/export/golden.xlsx").status_code == 200
+    assert client.put(f"/api/bundles/{bid}/docs/a..b/review", content=b"[1]").status_code == 422
+    assert client.put(f"/api/bundles/{bid}/docs/a..b/golden", json={"golden": {"documents": [{"extracted_fields": [1]}]}}).status_code == 422
+
+    assert client.post("/api/bundles", files=[("files", ("bad.zip", b"not a zip", "application/zip"))]).status_code == 400
+    n = len(client.get("/api/bundles").json())
+    assert client.post("/api/bundles", files=[("files", ("가" * 90 + ".png", _png(), "image/png"))]).status_code == 400
+    assert len(client.get("/api/bundles").json()) == n  # 실패한 업로드는 번들을 남기지 않는다
+
+    many = [("files", (f"m/original/{i}.png", b"x", "image/png")) for i in range(1100)]
+    assert len(client.post("/api/bundles", files=many).json()["docs"]) == 1100
