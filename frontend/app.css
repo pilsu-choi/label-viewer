@@ -212,6 +212,7 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 }
 .toast.show { opacity: 1; transform: none; }
 .toast-error { background: var(--bad); color: #fff; }
+.toast-action { margin-left: var(--sp-3); padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 
 /* ---------- 상단 바 ---------- */
 .topbar {
@@ -722,8 +723,9 @@ select.fr-dtype {
 .cmp-val { overflow-wrap: break-word; }
 .cmp-cell { display: flex; align-items: center; justify-content: space-between; gap: 2px var(--sp-2); flex-wrap: wrap; }
 .diff-add { padding: 0 1px; border-radius: var(--r-sm); background: var(--bad-soft); color: var(--bad); font-weight: 600; }
-/* AO/Harness 값 셀 자체가 채택 버튼(.gs-chip 재사용, cmp-chip 은 가로 배치로 오버라이드) */
-.cmp-chip { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--sp-2); height: auto; min-height: 20px; padding: 1px var(--sp-1); }
+/* 채택 버튼: 행 hover/포커스/근거 고정 때만 보인다(값 클릭은 근거 팝오버 고정) */
+.cmp-adopt { flex: none; margin-left: auto; visibility: hidden; }
+.cmp-table tr:hover .cmp-adopt, .cmp-table tr:focus-within .cmp-adopt, .cmp-table tr:focus .cmp-adopt, .cmp-table tr.is-pinned .cmp-adopt { visibility: visible; }
 
 .evidence-pop {
   position: fixed; z-index: 300; width: 360px; max-height: min(60vh, 420px); overflow: auto; overscroll-behavior: contain; padding: var(--sp-4);
@@ -739,6 +741,10 @@ select.fr-dtype {
 .evidence-pop table { width: 100%; margin: var(--sp-1) 0 var(--sp-2); border-collapse: collapse; }
 .evidence-pop th, .evidence-pop td { padding: 5px 6px; border-bottom: 1px solid var(--line); font-size: var(--fs-sm); text-align: left; }
 .evidence-pop th { color: var(--ink-3); font-weight: 600; }
+/* 근거가 길어 스크롤돼도 채택 버튼은 팝오버 하단에 고정 */
+.evidence-pop .ev-actions { position: sticky; bottom: calc(-1 * var(--sp-4)); display: flex; gap: var(--sp-2); margin: var(--sp-3) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)); padding: var(--sp-2) var(--sp-4) var(--sp-4); border-top: 1px solid var(--line); background: inherit; }
+.evidence-pop .ev-actions .btn { flex: 1; min-width: 0; }
+.evidence-pop .ev-actions .btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .evidence-pop .ev-detail { margin-top: var(--sp-3); padding-top: var(--sp-2); border-top: 1px solid var(--line); }
 .evidence-pop .ev-detail summary { cursor: pointer; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
 .evidence-pop .ev-path { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 0; }

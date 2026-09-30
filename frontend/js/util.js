@@ -59,16 +59,16 @@ export function fmtPct(v) {
   return (v * 100).toFixed(1) + '%';
 }
 
-export function toast(msg, kind = 'info') {
+// action = { label, onClick }: 토스트 안 버튼(예: 되돌리기). 있으면 더 오래(5초) 보여주고, 누르면 즉시 닫는다.
+export function toast(msg, kind = 'info', action) {
   const host = document.getElementById('toast-host');
   if (!host) return;
   const node = el('div', { class: `toast toast-${kind}` }, msg);
+  const close = () => { node.classList.remove('show'); setTimeout(() => node.remove(), 200); };
+  if (action) node.appendChild(el('button', { class: 'toast-action', type: 'button', onclick: () => { action.onClick(); close(); } }, action.label));
   host.appendChild(node);
   requestAnimationFrame(() => node.classList.add('show'));
-  setTimeout(() => {
-    node.classList.remove('show');
-    setTimeout(() => node.remove(), 200);
-  }, 3200);
+  setTimeout(close, action ? 5000 : 3200);
 }
 
 export function downloadUrl(url, filename) {

@@ -62,20 +62,26 @@ function entryLocation(entry) {
 // 표 항목의 행 소그룹 키. 그룹(area+container)과 행 번호로 정한다.
 function rowKeyOf(e) { return `${e.area}::${e.container || ''}::${e.row}`; }
 
-// AO/Harness 값 셀: 값이 있으면 편집 탭 .gs-chip 스타일을 재사용한 채택 버튼, 없으면 일반 칸.
+// AO/Harness 값 셀: 값 + 상태 배지, 그리고 행 hover/포커스/고정 때만 보이는 별도 [채택] 버튼(빈 값도 '' 로 채택 가능).
+// 셀 자체는 버튼이 아니므로 클릭하면 행의 근거 팝오버 고정으로 이어진다.
 // Golden 이 비어 있으면(EXTRA 성격) 빈 문자열과의 문자 diff 로 전체가 빨갛게 보이지 않도록 diff 없이 중립색으로 보여준다.
+// 채택할 값: 비어 있는 소스는 '' (백엔드가 ''==None 으로 보므로 Golden '' vs 누락 소스는 MATCH).
+const adoptable = (v) => (v == null ? '' : v);
+
 function valueCell(kind, label, e, goldenVal, onAdopt) {
   const value = e[kind];
   const status = e[`${kind}_status`];
   const goldenEmpty = goldenVal == null || goldenVal === '';
   const valSpan = goldenEmpty ? el('span', { class: 'cmp-val' }, value == null || value === '' ? '—' : String(value)) : diffSpan(goldenVal, value);
   const body = [valSpan, statusBadge(status)];
-  const available = value != null && value !== '';
-  if (!onAdopt || !available) return el('td', {}, el('div', { class: 'cmp-cell' }, body));
-  return el('td', {}, el('button', {
-    class: 'gs-chip cmp-chip', type: 'button', title: `${label} 값을 Golden에 채택`,
-    onclick: (ev) => { ev.stopPropagation(); onAdopt(e, value); },
-  }, body));
+  if (onAdopt) {
+    const tip = `${label} ${adoptable(value) === '' ? '빈 ' : ''}값을 Golden에 채택`;
+    body.push(el('button', {
+      class: 'btn ghost sm cmp-adopt', type: 'button', title: tip, 'aria-label': tip,
+      onclick: (ev) => { ev.stopPropagation(); onAdopt(e, adoptable(value)); },
+    }, '채택'));
+  }
+  return el('td', {}, el('div', { class: 'cmp-cell' }, body));
 }
 
 // 점수 카드의 압축 한 줄 요약(제목·정확도·작은 상태 막대). scoreCard() 와 같은 톤(STATUS_TONE)을 쓴다.
@@ -85,7 +91,7 @@ function scoreMini(label, score) {
   return el('span', { class: 'cmp-score-mini' }, [el('b', {}, label), ` ${score ? fmtPct(score.accuracy) : '—'}`, bar]);
 }
 
-function evidencePopover(entry) {
+function evidencePopover(entry, onAdopt) {
   const box = el('div', { class: 'evidence-pop' });
   box.appendChild(el('div', { class: 'ev-loc' }, entryLocation(entry)));
   const rows = [];
@@ -135,6 +141,14 @@ function evidencePopover(entry) {
       ]),
     ]),
   ]));
+  if (onAdopt) {
+    const btn = (label, v) => {
+      const val = adoptable(v);
+      return el('button', { class: 'btn sm', type: 'button', onclick: () => { hidePop(); onAdopt(entry, val); } },
+        el('span', {}, `${label} 채택 · ${val === '' ? '빈 값' : String(val)}`));
+    };
+    box.appendChild(el('div', { class: 'ev-actions' }, [btn('AO', entry.ao), btn('Harness', entry.harness)]));
+  }
   return box;
 }
 
@@ -156,6 +170,7 @@ function onOutsideClick(ev) {
 function hidePop() {
   clearHideTimer();
   if (popEl) { popEl.remove(); popEl = null; }
+  if (anchorRow) anchorRow.classList.remove('is-pinned');
   pinned = false; anchorRow = null;
   document.removeEventListener('keydown', onEsc);
   document.removeEventListener('mousedown', onOutsideClick, true);
@@ -185,10 +200,10 @@ function positionPop(x, y) {
   popEl.style.top = `${top}px`;
 }
 
-function openPop(tr, entry, x, y, onHoverBbox) {
+function openPop(tr, entry, x, y, onHoverBbox, onAdopt) {
   clearHideTimer();
   if (popEl) popEl.remove();
-  popEl = evidencePopover(entry);
+  popEl = evidencePopover(entry, onAdopt);
   popEl.addEventListener('mouseenter', clearHideTimer);
   popEl.addEventListener('mouseleave', () => { if (!pinned) scheduleHide(); });
   document.body.appendChild(popEl);
@@ -223,8 +238,9 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
   // 행 클릭/Enter 로 근거 팝오버를 고정하거나 해제한다(hover 로 열려 있으면 재생성하지 않고 그대로 고정).
   function togglePin(tr, e, x, y) {
     if (pinned && anchorRow === tr) { hidePop(); return; }
-    if (!popEl || anchorRow !== tr) openPop(tr, e, x, y, onHoverBbox);
+    if (!popEl || anchorRow !== tr) openPop(tr, e, x, y, onHoverBbox, onAdopt);
     pinned = true;
+    tr.classList.add('is-pinned');
     popEl.classList.add('pinned');
     document.addEventListener('keydown', onEsc);
     document.addEventListener('mousedown', onOutsideClick, true);
@@ -251,9 +267,9 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
       return;
     }
     if (ev.key === 'a' || ev.key === 'A') {
-      if (onAdopt && e.ao != null && e.ao !== '') { ev.preventDefault(); ev.stopPropagation(); onAdopt(e, e.ao); }
+      if (onAdopt) { ev.preventDefault(); ev.stopPropagation(); onAdopt(e, adoptable(e.ao)); }
     } else if (ev.key === 'h' || ev.key === 'H') {
-      if (onAdopt && e.harness != null && e.harness !== '') { ev.preventDefault(); ev.stopPropagation(); onAdopt(e, e.harness); }
+      if (onAdopt) { ev.preventDefault(); ev.stopPropagation(); onAdopt(e, adoptable(e.harness)); }
     } else if (ev.key === 'Enter') {
       ev.preventDefault(); ev.stopPropagation();
       const r = tr.getBoundingClientRect();
@@ -283,10 +299,10 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
     // 행/셀 상태는 편집 탭과 같은 entryState 하나로 정한다: bad(값 불일치) > warn(Golden 빈 값) > weak(한쪽 소스만 누락/추가).
     const rowState = isPending ? '' : entryState(e, goldenVal);
     const tr = el('tr', { class: `${rowState} ${isPending ? 'is-pending' : ''}`.trim(), dataset: { path: e.path }, tabindex: '0',
-      onmouseenter: (ev) => { if (!pinned || anchorRow === tr) openPop(tr, e, ev.clientX, ev.clientY, onHoverBbox); },
+      onmouseenter: (ev) => { if (!pinned || anchorRow === tr) openPop(tr, e, ev.clientX, ev.clientY, onHoverBbox, onAdopt); },
       onmousemove: (ev) => { if (popEl && anchorRow === tr && !pinned) positionPop(ev.clientX, ev.clientY); },
       onmouseleave: () => { if (!pinned) scheduleHide(); },
-      onclick: (ev) => { if (ev.target.closest('.cmp-chip')) return; togglePin(tr, e, ev.clientX, ev.clientY); },
+      onclick: (ev) => { togglePin(tr, e, ev.clientX, ev.clientY); },
       onkeydown: (ev) => rowKeydown(ev, tr, 'data', e),
     }, [
       el('td', {}, el('div', { class: 'cmp-item' }, el('span', { class: 'cmp-key', title: e.key }, e.key))),
@@ -442,7 +458,8 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
 
   return {
     // onAdopt 호출 직후 detail.js 가 불러 저장 대기 상태를 낙관적으로 표시한다.
-    markAdopted(path, value) { pending.set(path, value); draw(true); },
+    // 다시 그리면 고정 팝오버의 기준 행이 사라지므로 먼저 닫는다(A/H 키 채택·되돌리기).
+    markAdopted(path, value) { hidePop(); pending.set(path, value); draw(true); },
     flashPath(path) {
       // 대상 행이 현재 필터·소스·검색에 없을 때만 필터를 '전체'로, 검색어를 비운다. 이미 보이는 행이면 그대로 둔다.
       const entry = (doc.compare || []).find((c) => c.path === path);
