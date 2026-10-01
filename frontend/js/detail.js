@@ -27,7 +27,7 @@ function writeReconRatio(r) { try { localStorage.setItem('lv.reconRatio', r.toFi
 export function renderDetail(root, bundleId, docId) {
   const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), railCollapsed: readFlag('lv.railCollapsed'), panelCollapsed: readFlag('lv.panelCollapsed'), reconCollapsed: readFlag('lv.reconCollapsed') };
   let doc = null, bundle = null, editor = null, compareApi = null, imgViewer = null, documentRail = null;
-  let saveStateEl, reviewInput, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
+  let saveStateEl, reviewInput, enabledInput, offBadge, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
   let leftPanel, rightPanel, closeExportMenus, dragCleanup;
   let railHost, workspace, body, rightCollapseBtn;
   let destroyed = false, compareStale = false, rawBuilt = false;
@@ -204,7 +204,7 @@ export function renderDetail(root, bundleId, docId) {
   function syncDocumentRail() {
     if (!bundle || !doc) return;
     bundle.docs = bundle.docs.map((item) => item.id === docId ? {
-      ...item, has: doc.has, errors: doc.errors, review: doc.review, score: doc.score,
+      ...item, has: doc.has, errors: doc.errors, review: doc.review, score: doc.score, enabled: doc.enabled !== false,
       doc_type: doc.golden?.documents?.[0]?.doc_type || item.doc_type,
     } : item);
     documentRail?.update(bundle.docs, docId);
@@ -235,6 +235,20 @@ export function renderDetail(root, bundleId, docId) {
     reviewInput = el('input', { type: 'checkbox', checked: doc.review === 'done',
       onchange: (e) => { const review = e.target.checked ? 'done' : ''; api.putReview(bundleId, docId, review).then(() => { doc.review = review; syncDocumentRail(); toast('검수 상태를 변경했습니다.'); }).catch((err) => { e.target.checked = doc.review === 'done'; toast(err.message, 'error'); }); } });
 
+    // 활성 여부. 비활성 문서는 목록 화면의 '활성' 집계·내보내기에서 빠진다.
+    offBadge = el('span', { class: 'badge badge-muted badge-off', style: doc.enabled === false ? null : 'display:none' }, '비활성');
+    enabledInput = el('input', { type: 'checkbox', checked: doc.enabled !== false,
+      onchange: (e) => {
+        const enabled = e.target.checked;
+        e.target.disabled = true;
+        api.setEnabled(bundleId, [docId], enabled).then((b) => {
+          doc.enabled = enabled; bundle = b; offBadge.style.display = enabled ? 'none' : '';
+          documentRail?.update(bundle.docs, docId);
+          toast(enabled ? '문서를 활성화했습니다.' : '문서를 비활성화했습니다. 활성 목록 집계·내보내기에서 빠집니다.');
+        }).catch((err) => { e.target.checked = doc.enabled !== false; toast(err.message, 'error'); })
+          .finally(() => { e.target.disabled = false; });
+      } });
+
     const topbar = el('div', { class: 'topbar detail-topbar' }, [
       el('a', { class: 'brand', href: '#/' }, 'Label Viewer'),
       el('div', { class: 'sep' }),
@@ -243,10 +257,11 @@ export function renderDetail(root, bundleId, docId) {
         el('button', { class: 'btn ghost icon', disabled: !doc.prev, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.prev)}`), title: '이전 문서 (←)', 'aria-label': '이전 문서' }, icon('chevron-left')),
         el('button', { class: 'btn ghost icon', disabled: !doc.next, onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(doc.next)}`), title: '다음 문서 (→)', 'aria-label': '다음 문서' }, icon('chevron-right')),
       ]),
-      el('div', { class: 'title' }, [doc.id, doc.doc_type ? el('small', {}, doc.doc_type) : null, mismatchBadge(doc.doc_type_mismatch), classBadges(doc.classification)]),
+      el('div', { class: 'title' }, [doc.id, doc.doc_type ? el('small', {}, doc.doc_type) : null, offBadge, mismatchBadge(doc.doc_type_mismatch), classBadges(doc.classification)]),
       el('div', { class: 'grow' }),
       saveStateEl,
       el('button', { class: 'btn primary sm', title: 'Ctrl+S', onclick: () => editor && editor.save() }, '저장'),
+      el('label', { class: 'switch', title: '끄면 활성 목록 집계·내보내기에서 빠집니다' }, [enabledInput, '활성']),
       el('label', { class: 'switch' }, [reviewInput, '검수 완료']),
       exportMenu(),
       el('button', { class: 'btn ghost icon', title: '단축키 (?)', 'aria-label': '단축키', onclick: openHelp }, icon('help-circle')),
