@@ -11,7 +11,10 @@ IMAGE=label-viewer:latest
 TAR="$(mktemp -d)/label-viewer.tar.gz"
 trap 'rm -rf "$(dirname "$TAR")"' EXIT
 
-[ "${1:-}" = --no-build ] || docker build -t "$IMAGE" "$REPO_ROOT"
+# 서버는 amd64 다. Apple Silicon 에서 기본 빌드하면 arm64 라 컨테이너가 unhealthy 로 뜬다
+[ "${1:-}" = --no-build ] || docker build --platform linux/amd64 -t "$IMAGE" "$REPO_ROOT"
+ARCH="$(docker image inspect "$IMAGE" --format '{{.Architecture}}')"
+[ "$ARCH" = amd64 ] || { echo "[deploy] ${IMAGE} 가 ${ARCH} 이미지다. amd64 로 다시 빌드하십시오." >&2; exit 1; }
 docker save "$IMAGE" | gzip > "$TAR"
 echo "[deploy] 전송: $(du -h "$TAR" | cut -f1) → ${SSH_HOST}:${REMOTE_ROOT}"
 "${SSH[@]}" "sudo mkdir -p ${REMOTE_ROOT} && sudo chown \$(id -u):\$(id -g) ${REMOTE_ROOT}"

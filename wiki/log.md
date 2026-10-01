@@ -142,3 +142,6 @@ status: active
 
 ### Creation
 - [문서 활성·비활성, 범위별 집계·내보내기, 목록 페이지네이션](2026-10-01-doc-enable-pagination.md): 문서 다중 활성·비활성, 활성/비활성 범위별 정확도·Excel·ZIP, 목록 50/100/200·레일 100건 페이지, ZIP 임시 파일 스트리밍, 문서 요약 캐시 분리.
+
+### Update
+- [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `a2f442a` 재배포(문서 활성·비활성·페이지네이션), arm64 이미지로 인한 일시 중단과 `deploy.sh` amd64 고정 기록.
