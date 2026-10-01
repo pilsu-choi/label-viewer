@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import difflib
+from functools import partial
 from itertools import zip_longest
 import re
 import unicodedata
@@ -12,6 +13,13 @@ _EMPTY_TOKENS = {"", "-", "null", "none", "[]"}
 _NUM_RE = re.compile(r"-?\d+(\.\d+)?")
 _DATE8_RE = re.compile(r"^\d{8}$")
 _DATE_RE = re.compile(r"^(\d{4})[.\-/년](\d{1,2})[.\-/월]?(\d{1,2})일?\.?$")
+# 항목명·요양기관종류는 하네스가 표준명으로 내고 정답지는 서식 원문을 적는다 — 같은 값의 인쇄 변형은 맞음(2026-10-02 결정)
+_LABEL_MARKS = re.compile(r"[·・ㆍ‧,.\-()]")
+_LABEL_ALIASES = {
+    "치료재료료": "치료재료대", "재활및물리치료": "재활및물리치료료",
+    "의원": "의원급보건기관", "의원급": "의원급보건기관", "보건기관": "의원급보건기관", "병원": "병원급",
+}
+_RECEIPT_ALIASES = {"계": "합계"}  # 세부내역서는 계·합계가 다른 행이다
 
 
 def norm(value: Any) -> str | None:
@@ -56,8 +64,17 @@ def harness_value(cell: dict | None) -> Any:
     return cell.get("value")
 
 
-def cell_status(dtype: str | None, golden_val: Any, other_val: Any) -> str:
+def _label(s: str | None, receipt: bool) -> str | None:
+    if not s:
+        return s
+    s = _LABEL_MARKS.sub("", s).replace("제재료", "제제료")
+    return (_RECEIPT_ALIASES.get(s) if receipt else None) or _LABEL_ALIASES.get(s, s)
+
+
+def cell_status(dtype: str | None, golden_val: Any, other_val: Any, key: str = "", receipt: bool = False) -> str:
     gn, on = norm(golden_val), norm(other_val)
+    if key == "항목" or key.endswith("요양기관종류"):
+        gn, on = _label(gn, receipt), _label(on, receipt)
     if gn == on:
         return "MATCH"
     if not gn:
@@ -155,13 +172,13 @@ def _ui_bbox_index(doc: dict | None) -> dict[tuple[str, str, Any, str], list[dic
 
 def _row(doc_i: int, area: str, container: str, row: Any, key: str, dtype: str,
          gcell: dict | None, acell: dict | None, hcell: dict | None,
-         ui_bbox: list[dict] | None = None) -> dict:
+         ui_bbox: list[dict] | None = None, receipt: bool = False) -> dict:
     gval = (gcell or {}).get("value") if gcell is not None else None
     aval = acell.get("value") if acell is not None else None
     hval = harness_value(hcell) if hcell is not None else None
     has_golden = gcell is not None
-    ao_status = cell_status(dtype, gval, aval) if (has_golden or acell is not None) else ""
-    harness_status = cell_status(dtype, gval, hval) if (has_golden or hcell is not None) else ""
+    ao_status = cell_status(dtype, gval, aval, key, receipt) if (has_golden or acell is not None) else ""
+    harness_status = cell_status(dtype, gval, hval, key, receipt) if (has_golden or hcell is not None) else ""
     if area == "table":
         path = f"documents[{doc_i}].tables[{container}].rows[{row}].cells[{key}]"
     elif area == "group":
@@ -196,6 +213,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
     ai = DocIndex(adoc, is_harness=False)
     hi = DocIndex(hdoc, is_harness=True)
     ui_boxes = _ui_bbox_index(ui_doc)
+    make_row = partial(_row, receipt=base.get("doc_type") == "진료비영수증")
     rows: list[dict] = []
     consumed_a: set[int] = set()
     consumed_h: set[int] = set()
@@ -211,7 +229,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
         acell = take(ai, None, key, consumed_a) if has_golden else ai.find(None, key)
         hcell = take(hi, None, key, consumed_h) if has_golden else hi.find(None, key)
         gcell = c if has_golden else None
-        rows.append(_row(doc_i, "field", "", "", key, dtype, gcell, acell, hcell,
+        rows.append(make_row(doc_i, "field", "", "", key, dtype, gcell, acell, hcell,
                          ui_boxes.get(("field", "", "", key))))
 
     for g in base.get("extracted_groups") or []:
@@ -221,7 +239,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
             acell = take(ai, gk, key, consumed_a) if has_golden else ai.find(gk, key)
             hcell = take(hi, gk, key, consumed_h) if has_golden else hi.find(gk, key)
             gcell = c if has_golden else None
-            rows.append(_row(doc_i, "group", gk, "", key, dtype, gcell, acell, hcell,
+            rows.append(make_row(doc_i, "group", gk, "", key, dtype, gcell, acell, hcell,
                              ui_boxes.get(("group", gk, "", key))))
 
     for t in base.get("extracted_tables") or []:
@@ -239,7 +257,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
                 if tk not in tables and idx.by_key.get(tk) is not None:
                     scalar = idx.by_key[tk]
                     val = harness_value(scalar) if label == "harness" else scalar.get("value")
-                    r = _row(doc_i, "table", tk, "", tk, "string", {"value": None}, None, None)
+                    r = make_row(doc_i, "table", tk, "", tk, "string", {"value": None}, None, None)
                     r[label] = val
                     r[f"{label}_status"] = "TYPE_MISMATCH"
                     rows.append(r)
@@ -254,7 +272,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
                         continue
                     dtype = gcell.get("dtype") or "string"
                     ui_row = g_to_a.get(gi)
-                    rows.append(_row(doc_i, "table", tk, gi, col, dtype, gcell, arow.get(col), hrow.get(col),
+                    rows.append(make_row(doc_i, "table", tk, gi, col, dtype, gcell, arow.get(col), hrow.get(col),
                                      ui_boxes.get(("table", tk, ui_row, col)) if ui_row is not None else None))
             # 정답에 없는 결과 행: AO·Harness 의 k번째 추가 행을 한 줄로 묶는다
             for k, (ai_idx, hi_idx) in enumerate(zip_longest(sorted(a_extra), sorted(h_extra))):
@@ -262,7 +280,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
                 hrow = hrows[hi_idx] if hi_idx is not None else {}
                 for col in dict.fromkeys([*arow, *hrow]):
                     cell = arow.get(col) or hrow.get(col)
-                    rows.append(_row(doc_i, "table", tk, f"+{len(grows) + k}", col, cell.get("dtype") or "string",
+                    rows.append(make_row(doc_i, "table", tk, f"+{len(grows) + k}", col, cell.get("dtype") or "string",
                                       None, arow.get(col), hrow.get(col),
                                       ui_boxes.get(("table", tk, ai_idx if ai_idx is not None else hi_idx, col))))
         else:
@@ -276,10 +294,10 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
                         continue
                     dtype = cell.get("dtype") or "string"
                     if adoc is not None:
-                        rows.append(_row(doc_i, "table", tk, ridx, col, dtype, None, cell, other.get(col),
+                        rows.append(make_row(doc_i, "table", tk, ridx, col, dtype, None, cell, other.get(col),
                                          ui_boxes.get(("table", tk, ridx, col))))
                     else:
-                        rows.append(_row(doc_i, "table", tk, ridx, col, dtype, None, None, cell,
+                        rows.append(make_row(doc_i, "table", tk, ridx, col, dtype, None, None, cell,
                                          ui_boxes.get(("table", tk, ridx, col))))
 
     if has_golden:
@@ -298,7 +316,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
             ui_bbox = ui_boxes.get((area, group or "", "", key))
             if ui_bbox is None and area == "field":
                 ui_bbox = ui_boxes.get(("group", group or "", "", key))
-            rows.append(_row(doc_i, area, group or "", "", key, dtype, None, acell, hcell, ui_bbox))
+            rows.append(make_row(doc_i, area, group or "", "", key, dtype, None, acell, hcell, ui_bbox))
 
     return rows
 
