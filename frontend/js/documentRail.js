@@ -7,24 +7,26 @@ const stateOf = (doc) => doc.errors && doc.errors.length ? STATE.error
 
 // 검색어·상태 필터는 문서를 옮겨 다녀도(레일 재생성) 유지한다. 유형 필터는 util 에서 목록 화면과 공유.
 // page 가 null 이면 현재 문서가 있는 쪽을 보여 준다. 수천 건을 한 번에 그리지 않도록 PAGE 건씩 끊는다.
-const kept = { bundleId: null, query: '', filter: 'all', page: null };
+// 문서를 옮기면 화면이 통째로 다시 그려지므로 목록 스크롤 위치(scroll)도 여기 보관한다.
+const kept = { bundleId: null, query: '', filter: 'all', page: null, scroll: 0 };
 const PAGE = 100;
 
 export function createDocumentRail(host, docs, currentId, onSelect, { onToggleCollapse, bundleId } = {}) {
-  if (kept.bundleId !== bundleId) Object.assign(kept, { bundleId, query: '', filter: 'all', page: null });
-  const search = el('input', { class: 'doc-rail-search', type: 'search', placeholder: '문서 ID·유형 검색', 'aria-label': '문서 검색', value: kept.query, oninput: debounce((e) => { kept.query = e.target.value; kept.page = null; draw(); }, 150) });
-  const select = el('select', { class: 'doc-rail-filter', 'aria-label': '검수 상태 필터', onchange: (e) => { kept.filter = e.target.value; kept.page = null; draw(); } }, [
+  if (kept.bundleId !== bundleId) Object.assign(kept, { bundleId, query: '', filter: 'all', page: null, scroll: 0 });
+  const reset = () => { kept.page = null; kept.scroll = 0; };
+  const search = el('input', { class: 'doc-rail-search', type: 'search', placeholder: '문서 ID·유형 검색', 'aria-label': '문서 검색', value: kept.query, oninput: debounce((e) => { kept.query = e.target.value; reset(); draw(); }, 150) });
+  const select = el('select', { class: 'doc-rail-filter', 'aria-label': '검수 상태 필터', onchange: (e) => { kept.filter = e.target.value; reset(); draw(); } }, [
     el('option', { value: 'all' }, '모든 상태'), el('option', { value: 'pending' }, '미검수'),
     el('option', { value: 'progress' }, '검수 중'), el('option', { value: 'done' }, '검수 완료'),
     el('option', { value: 'error' }, '오류'),
   ]);
   select.value = kept.filter;
   const typeHost = el('div', { class: 'doc-rail-typehost' });
-  const drawTypes = () => { clear(typeHost); typeHost.appendChild(docTypeSelect(docs, bundleId, () => { kept.page = null; draw(); }, 'doc-rail-filter')); };
+  const drawTypes = () => { clear(typeHost); typeHost.appendChild(docTypeSelect(docs, bundleId, () => { reset(); draw(); }, 'doc-rail-filter')); };
   const titleCount = el('span', { class: 'doc-rail-count' }, String(docs.length));
   const collapseBtn = el('button', { class: 'btn ghost icon', title: '문서 목록 접기', 'aria-label': '문서 목록 접기', onclick: () => onToggleCollapse && onToggleCollapse() }, icon('panel-left-close'));
   const vlabel = el('span', { class: 'doc-rail-vlabel' }, '문서');
-  const list = el('nav', { class: 'doc-rail-list', 'aria-label': '번들 문서' });
+  const list = el('nav', { class: 'doc-rail-list', 'aria-label': '번들 문서', onscroll: () => { kept.scroll = list.scrollTop; } });
   const pagerHost = el('div', { class: 'doc-rail-pager', style: 'display:none' });
   host.append(
     el('div', { class: 'doc-rail-head panel-head' }, [el('span', {}, '문서'), el('div', { class: 'grow' }), titleCount, collapseBtn]),
@@ -66,11 +68,20 @@ export function createDocumentRail(host, docs, currentId, onSelect, { onToggleCo
       ]);
       list.appendChild(button);
     });
+    // 레일은 화면에 붙기 전에 그려지므로 다음 프레임에 위치를 복원하고, 현재 문서가 가려져 있으면 보이도록 맞춘다.
+    requestAnimationFrame(() => {
+      list.scrollTop = kept.scroll;
+      const active = list.querySelector('.doc-rail-item.active');
+      if (!active) return;
+      const top = active.offsetTop - list.offsetTop;
+      if (top < list.scrollTop) list.scrollTop = top;
+      else if (top + active.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + active.offsetHeight - list.clientHeight;
+    });
   }
   function drawPager(page, last, total) {
     pagerHost.style.display = last > 0 ? '' : 'none';
     if (!last) return;
-    const go = (n) => { kept.page = n; draw(); list.scrollTop = 0; };
+    const go = (n) => { kept.page = n; kept.scroll = 0; draw(); };
     mount(pagerHost, [
       el('button', { class: 'btn ghost sm icon', disabled: page <= 0, 'aria-label': '이전 문서 묶음', onclick: () => go(page - 1) }, icon('chevron-left')),
       el('span', {}, `${page * PAGE + 1}–${Math.min(total, (page + 1) * PAGE)} / ${total}`),
