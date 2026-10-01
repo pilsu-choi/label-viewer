@@ -12,7 +12,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request
 from starlette.datastructures import UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import bundle as B
@@ -150,19 +150,37 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
         call(B.set_review, data_dir, bundle_id, doc_id, body.get("review", ""))
         return Response(status_code=204)
 
+    @app.put("/api/bundles/{bundle_id}/enabled")
+    async def put_enabled(bundle_id: str, request: Request):
+        body = await json_body(request)
+        call(B.set_enabled, data_dir, bundle_id, body.get("ids"), body.get("enabled"))
+        return call(B.bundle_view, data_dir, bundle_id)
+
+    def _export_name(bundle_id: str, doc: Optional[str], scope: str, ext: str) -> str:
+        suffix = f"-{doc}" if doc else ("-disabled" if scope == "disabled" else "")
+        return quote(f"{bundle_id}{suffix}{ext}")
+
     @app.get("/api/bundles/{bundle_id}/export/bundle.zip")
-    def export_zip(bundle_id: str, doc: Optional[str] = None):
-        data = call(E.export_bundle_zip, data_dir, bundle_id, doc)
-        name = quote(f"{bundle_id}-{doc}.zip" if doc else f"{bundle_id}.zip")
-        return Response(content=data, media_type="application/zip",
-                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{name}"})
+    def export_zip(bundle_id: str, doc: Optional[str] = None, scope: str = "enabled"):
+        fp = call(E.export_bundle_zip, data_dir, bundle_id, doc, scope)
+        size = fp.seek(0, os.SEEK_END)
+        fp.seek(0)
+
+        def chunks():
+            with fp:
+                while block := fp.read(1 << 20):
+                    yield block
+
+        return StreamingResponse(chunks(), media_type="application/zip", headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{_export_name(bundle_id, doc, scope, '.zip')}",
+            "Content-Length": str(size)})
 
     @app.get("/api/bundles/{bundle_id}/export/golden.xlsx")
-    def export_xlsx(bundle_id: str, doc: Optional[str] = None):
-        data = call(E.export_golden_xlsx, data_dir, bundle_id, doc)
+    def export_xlsx(bundle_id: str, doc: Optional[str] = None, scope: str = "enabled"):
+        data = call(E.export_golden_xlsx, data_dir, bundle_id, doc, scope)
         return Response(content=data,
                          media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                         headers={"Content-Disposition": f'attachment; filename="{bundle_id}-golden.xlsx"'})
+                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_export_name(bundle_id, doc, scope, '-golden.xlsx')}"})
 
     if FRONTEND_DIR.is_dir():
         ver = _static_version()

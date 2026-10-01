@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import fcntl
 import json
 import os
 import re
@@ -113,6 +114,9 @@ def _atomic_write_json(path: Path, data: Any) -> None:
 
 _MEMO: dict = {}
 _MEMO_MAX = 4096
+# 문서 요약은 작고 번들 화면마다 전부 쓰인다. 파싱 JSON 캐시와 나눠야 수천 건 번들에서 서로 밀어내지 않는다
+_SUM_MEMO: dict = {}
+_SUM_MEMO_MAX = 50_000
 _RACY_NS = 20_000_000  # mtime 이 방금 전이면 같은 tick 의 재기록을 못 알아볼 수 있어 키를 매번 다르게 한다
 
 
@@ -125,13 +129,13 @@ def _sig(p: Path) -> tuple | None:
     return (st.st_ino, st.st_mtime_ns, st.st_size, *racy)
 
 
-def _memo(key: tuple, fn: Callable[[], Any]) -> Any:
+def _memo(key: tuple, fn: Callable[[], Any], store: dict = _MEMO, limit: int = _MEMO_MAX) -> Any:
     try:
-        return _MEMO[key]
+        return store[key]
     except KeyError:
-        if len(_MEMO) >= _MEMO_MAX:
-            _MEMO.clear()
-        val = _MEMO[key] = fn()
+        if len(store) >= limit:
+            store.clear()
+        val = store[key] = fn()
         return val
 
 
@@ -170,6 +174,19 @@ def load_state(bdir: Path) -> dict:
 
 def save_state(bdir: Path, state: dict) -> None:
     _atomic_write_json(bdir / "_state.json", state)
+
+
+def update_state(bdir: Path, fn: Callable[[dict], None]) -> None:
+    """_state.json 읽기-수정-쓰기. 워커가 여럿이라 파일 잠금으로 동시 변경이 서로 덮어쓰지 않게 한다."""
+    with open(bdir / ".state.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = load_state(bdir)
+        fn(state)
+        save_state(bdir, state)
+
+
+def disabled_ids(state: dict) -> set[str]:
+    return set(state.get("disabled") or [])
 
 
 # ── 업로드 ────────────────────────────────────────────────────────────────
@@ -468,6 +485,7 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
         "has": has,
         "errors": errors,
         "review": (state.get("review") or {}).get(doc_id, ""),
+        "enabled": doc_id not in disabled_ids(state),
         "doc_type": label(_doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"])),
         "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
         "doc_type_suggest": _doc_type_suggest(parsed),
@@ -492,7 +510,7 @@ def _doc_summary(bdir: Path, doc_id: str, rv: str) -> dict:
     """bundle_view 의 문서 한 줄 요약. 문서 파일 시그니처+검수 상태가 같으면 캐시를 쓴다."""
     paths = {k: find_kind_file(bdir, k, doc_id) for k in (*DOC_KINDS, "ao_ui")}
     return _memo(("sum", str(bdir), doc_id, rv, tuple(_sig(p) if p else None for p in paths.values())),
-                 lambda: _compute_summary(paths, doc_id, rv))
+                 lambda: _compute_summary(paths, doc_id, rv), _SUM_MEMO, _SUM_MEMO_MAX)
 
 
 def _compute_summary(paths: dict, doc_id: str, rv: str) -> dict:
@@ -522,17 +540,12 @@ def _compute_summary(paths: dict, doc_id: str, rv: str) -> dict:
     }
 
 
-def bundle_view(data_dir: Path, bundle_id: str) -> dict:
-    bdir = bundle_dir(data_dir, bundle_id)
-    if not bdir.is_dir():
-        raise ApiError(404, "bundle not found")
-    state = load_state(bdir)
-    review = state.get("review") or {}
+def _aggregate(docs: list[dict]) -> dict:
+    """문서 요약 목록의 건수·채점·분류 집계. 분류 오답 문서는 필드 채점에서 뺀다."""
     agg = {"ao": {"MATCH": 0, "MISMATCH": 0, "MISSING": 0, "EXTRA": 0, "TYPE_MISMATCH": 0, "total": 0},
            "harness": {"MATCH": 0, "MISMATCH": 0, "MISSING": 0, "EXTRA": 0, "TYPE_MISMATCH": 0, "total": 0}}
     cls_sum = {"ao": [0, 0], "harness": [0, 0]}  # [정답 수, 판정 문서 수]
     n_golden = n_reviewed = n_missing = n_error = 0
-    docs = [_doc_summary(bdir, doc_id, review.get(doc_id, "")) for doc_id in doc_ids(bdir)]
     for d in docs:
         has, cls, sc = d["has"], d["classification"], d["score"]
         for side in ("ao", "harness"):
@@ -552,18 +565,46 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
             return None
         return {**a, "accuracy": round(a["MATCH"] / a["total"], 4)}
 
-    total_docs = len(docs)
+    return {
+        "docs": len(docs), "golden": n_golden, "reviewed": n_reviewed,
+        "pending": len(docs) - n_reviewed, "missing": n_missing, "error": n_error,
+        "score": {"ao": _finish(agg["ao"]), "harness": _finish(agg["harness"])},
+        "classification": {s: {"correct": c, "total": t, "accuracy": round(c / t, 4)} if t else None
+                           for s, (c, t) in cls_sum.items()},
+    }
+
+
+def bundle_view(data_dir: Path, bundle_id: str) -> dict:
+    bdir = bundle_dir(data_dir, bundle_id)
+    if not bdir.is_dir():
+        raise ApiError(404, "bundle not found")
+    state = load_state(bdir)
+    review = state.get("review") or {}
+    disabled = disabled_ids(state)
+    # 캐시된 요약은 고치지 않고 활성 여부만 얹은 새 dict 를 만든다
+    docs = [{**_doc_summary(bdir, doc_id, review.get(doc_id, "")), "enabled": doc_id not in disabled}
+            for doc_id in doc_ids(bdir)]
     return {
         "id": bundle_id, "name": state.get("name", bundle_id), "created_at": state.get("created_at", ""),
         "docs": docs,
-        "summary": {
-            "docs": total_docs, "golden": n_golden, "reviewed": n_reviewed,
-            "pending": total_docs - n_reviewed, "missing": n_missing, "error": n_error,
-            "score": {"ao": _finish(agg["ao"]), "harness": _finish(agg["harness"])},
-            "classification": {s: {"correct": c, "total": t, "accuracy": round(c / t, 4)} if t else None
-                               for s, (c, t) in cls_sum.items()},
-        },
+        "summary": _aggregate(docs),
+        "summary_by_scope": {"enabled": _aggregate([d for d in docs if d["enabled"]]),
+                             "disabled": _aggregate([d for d in docs if not d["enabled"]])},
     }
+
+
+SCOPES = ("enabled", "disabled")
+
+
+def scope_doc_ids(data_dir: Path, bundle_id: str, scope: str) -> list[str]:
+    """내보내기 범위(활성·비활성)에 드는 문서 ID."""
+    if scope not in SCOPES:
+        raise ApiError(422, f"scope must be one of {SCOPES}")
+    bdir = bundle_dir(data_dir, bundle_id)
+    if not bdir.is_dir():
+        raise ApiError(404, "bundle not found")
+    disabled = disabled_ids(load_state(bdir))
+    return [d for d in doc_ids(bdir) if (d in disabled) == (scope == "disabled")]
 
 
 def _bundle_counts(bdir: Path, review: dict) -> dict:
@@ -710,13 +751,33 @@ def set_review(data_dir: Path, bundle_id: str, doc_id: str, review: str) -> None
     bdir = bundle_dir(data_dir, bundle_id)
     if doc_id not in doc_ids(bdir):
         raise ApiError(404, "document not found")
-    state = load_state(bdir)
-    state.setdefault("review", {})
-    if review:
-        state["review"][doc_id] = review
-    else:
-        state["review"].pop(doc_id, None)
-    save_state(bdir, state)
+
+
+    def apply(state: dict) -> None:
+        state.setdefault("review", {})
+        if review:
+            state["review"][doc_id] = review
+        else:
+            state["review"].pop(doc_id, None)
+    update_state(bdir, apply)
+
+
+def set_enabled(data_dir: Path, bundle_id: str, ids: Any, enabled: Any) -> None:
+    """여러 문서의 활성 여부를 한 번에 바꾼다. 기본은 활성이라 비활성 문서 ID만 저장한다."""
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids) or not isinstance(enabled, bool):
+        raise ApiError(422, "ids(list of str) and enabled(bool) required")
+    bdir = bundle_dir(data_dir, bundle_id)
+    if not bdir.is_dir():
+        raise ApiError(404, "bundle not found")
+    unknown = set(ids) - set(doc_ids(bdir))
+    if unknown:
+        raise ApiError(404, f"document not found: {sorted(unknown)[:5]}")
+
+    def apply(state: dict) -> None:
+        disabled = disabled_ids(state)
+        disabled = disabled - set(ids) if enabled else disabled | set(ids)
+        state["disabled"] = sorted(disabled, key=_natural_key)
+    update_state(bdir, apply)
 
 
 # ── 이미지 ────────────────────────────────────────────────────────────────

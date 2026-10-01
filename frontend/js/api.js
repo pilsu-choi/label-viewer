@@ -45,12 +45,18 @@ export const api = {
     req('PUT', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`, { golden }),
   deleteGolden: (bundleId, docId) =>
     req('DELETE', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`),
+  // 여러 문서 활성 여부를 바꾸고 갱신된 번들 화면 데이터를 받는다. 문서 이동용 캐시도 바꿔 둔다.
+  setEnabled(bundleId, ids, enabled) {
+    const p = req('PUT', `/api/bundles/${encodeURIComponent(bundleId)}/enabled`, { ids, enabled });
+    return p.then((b) => { bundleCache = { id: bundleId, p: Promise.resolve(b) }; return b; });
+  },
   putReview: (bundleId, docId, review) =>
     req('PUT', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/review`, { review }),
-  exportBundleZipUrl: (bundleId, docId) =>
-    `/api/bundles/${encodeURIComponent(bundleId)}/export/bundle.zip${docId ? `?doc=${encodeURIComponent(docId)}` : ''}`,
-  exportGoldenXlsxUrl: (bundleId, docId) =>
-    `/api/bundles/${encodeURIComponent(bundleId)}/export/golden.xlsx${docId ? `?doc=${encodeURIComponent(docId)}` : ''}`,
+  // docId 가 있으면 그 문서만, 없으면 scope('enabled'|'disabled') 문서만 내보낸다.
+  exportBundleZipUrl: (bundleId, docId, scope = 'enabled') =>
+    `/api/bundles/${encodeURIComponent(bundleId)}/export/bundle.zip?${docId ? `doc=${encodeURIComponent(docId)}` : `scope=${scope}`}`,
+  exportGoldenXlsxUrl: (bundleId, docId, scope = 'enabled') =>
+    `/api/bundles/${encodeURIComponent(bundleId)}/export/golden.xlsx?${docId ? `doc=${encodeURIComponent(docId)}` : `scope=${scope}`}`,
 
   uploadBundle(files, name, onProgress) {
     return new Promise((resolve, reject) => {

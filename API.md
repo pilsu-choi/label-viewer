@@ -13,7 +13,7 @@ storage/bundles/{bundle_id}/
 ├── ao_ui/         선택적 bbox sidecar JSON (읽기 전용)
 ├── harness/       하네스 응답 JSON       (읽기 전용)
 ├── golden/        정답지 JSON           (유일한 편집 대상)
-└── _state.json    {"name": "...", "created_at": "...", "review": {"<doc_id>": "done|progress"}}
+└── _state.json    {"name": "...", "created_at": "...", "review": {"<doc_id>": "done|progress"}, "disabled": ["<doc_id>", ...]}
 ```
 
 `bundle_id` 는 업로드 시각 기반 slug(`20260928-2113-ab12`)다. 번들 이름은 업로드한 폴더/ZIP 이름이다.
@@ -114,10 +114,14 @@ storage/bundles/{bundle_id}/
    "doc_type":"진료비영수증",
    "score":{"ao":{"MATCH":10,"MISMATCH":1,"MISSING":0,"EXTRA":0,"TYPE_MISMATCH":0,"total":11,"accuracy":0.909},
             "harness":{...}},
-   "mismatch":1}],
+   "mismatch":1,
+   "enabled":true}],
  "summary":{"docs":0,"golden":0,"reviewed":0,"pending":0,"missing":0,"error":0,
-            "score":{"ao":{...},"harness":{...}}}}
+            "score":{"ao":{...},"harness":{...}}},
+ "summary_by_scope":{"enabled":{...summary 와 같은 형식...},"disabled":{...}}}
 ```
+- `enabled`: 문서 활성 여부. 기본은 활성이며 `_state.json` 의 `disabled` 목록에 있는 문서만 false.
+- `summary` 는 전체 문서, `summary_by_scope.enabled|disabled` 는 활성·비활성 문서만의 같은 집계.
 - `score` 는 golden 이 있고 대상 JSON 이 있을 때만 계산, 없으면 해당 키 null.
 - `mismatch` = compare 행 중 `ao_status` 또는 `harness_status` 가 `MATCH` 가 아닌(빈 문자열 제외) 행 수. 상세 화면의 비교 탭 배지·`M` 이동과 같은 기준.
 - `missing` = original·ao_extract·harness·golden 중 하나라도 없는 문서 수. `error` = errors 가 있는 문서 수.
@@ -125,7 +129,7 @@ storage/bundles/{bundle_id}/
 
 ### GET /api/bundles/{id}/docs/{doc_id}
 ```json
-{"id":"","has":{...},"errors":[],"review":"",
+{"id":"","has":{...},"errors":[],"review":"","enabled":true,
  "pages":{"original":1,"preprocessed":0},
  "golden":{...}|null, "ao":{...}|null, "harness":{...}|null,
  "compare":[{"path":"documents[0].groups[환자정보].fields[성명]","doc":0,"area":"field|group|table",
@@ -159,10 +163,16 @@ kind = `ao_extract|ao_ui|harness|golden`. 파일 그대로(파싱 실패여도 �
 ### PUT /api/bundles/{id}/docs/{doc_id}/review  `{"review":"done|progress|"}`
 `_state.json` 갱신. 204.
 
-### GET /api/bundles/{id}/export/bundle.zip[?doc={doc_id}]
-`original/`·`preprocessed/`·`ao_extract/`·`harness/`·`golden/`·`ao_ui/` 파일을 저장 폴더 구조 그대로 묶은 ZIP. 그대로 다시 업로드할 수 있다. `doc` 이 있으면 그 문서 파일만.
+### PUT /api/bundles/{id}/enabled  `{"ids":["doc_id",...],"enabled":true|false}`
+여러 문서의 활성 여부를 한 번에 바꾼다. 형식 오류 422, 없는 문서가 섞이면 404(아무것도 바꾸지 않음). 응답: `GET /api/bundles/{id}`.
+`_state.json` 쓰기는 파일 잠금(`.state.lock`)으로 묶어 검수 상태 변경과 동시에 일어나도 서로 덮어쓰지 않는다.
 
-### GET /api/bundles/{id}/export/golden.xlsx[?doc={doc_id}]
+### GET /api/bundles/{id}/export/bundle.zip[?doc={doc_id}|?scope=enabled|disabled]
+`original/`·`preprocessed/`·`ao_extract/`·`harness/`·`golden/`·`ao_ui/` 파일을 저장 폴더 구조 그대로 묶은 ZIP. 그대로 다시 업로드할 수 있다. `doc` 이 있으면 그 문서 파일만(활성 여부 무관), 없으면 `scope`(기본 `enabled`) 문서만. 파일명 `<번들>.zip`·`<번들>-disabled.zip`·`<번들>-<문서>.zip`.
+수천 건이면 수 GB가 될 수 있어 `storage/.cache/tmp/` 임시 파일에 쓴 뒤 1MB씩 내려보낸다(응답 후 삭제). PNG·JPEG·WebP 는 다시 압축하지 않는다.
+
+### GET /api/bundles/{id}/export/golden.xlsx[?doc={doc_id}|?scope=enabled|disabled]
+`doc` 이 없으면 `scope`(기본 `enabled`) 문서만 담는다.
 openpyxl. 시트:
 - `요약`: 문서별 id, doc_type, 검수 상태, AO/Harness MATCH·MISMATCH·MISSING·EXTRA·TYPE_MISMATCH·정확도, 마지막 행 합계.
 - `필드`: 문서, 문서index, 구역(필드/그룹), 그룹, key, value, dtype.
