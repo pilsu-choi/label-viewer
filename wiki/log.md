@@ -151,3 +151,6 @@ status: active
 
 ### Update
 - [Label Viewer 비교 탭 사용성 개선](2026-09-29-compare-tab-usability.md): 표 `#행` 소그룹 헤더의 대표 값·불일치 수를 필터 전 행 전체 기준으로 수정(2026-10-01, `fix/rowgroup-label`).
+
+### Update
+- [문서 활성·비활성, 범위별 집계·내보내기, 목록 페이지네이션](2026-10-01-doc-enable-pagination.md): 상세 화면 문서 레일에서 문서 이동 시 스크롤이 맨 위로 돌아가던 문제 수정 기록 추가(2026-10-01, `fix/doc-rail-scroll`).
