@@ -45,6 +45,7 @@ status: active
 - AWS 재배포(2026-09-30, dev `8f54242`): 성능 최적화 반영. 컨테이너 `healthy`, uvicorn 워커 2개 기동, 외부에서 `/static/<ver>/` `immutable` 캐시·JS gzip 응답, `/api/bundles` 200 확인.
 - AWS 재배포(2026-09-30, dev `9f77944`): 비교 탭 채택 오클릭 방지·되돌리기·빈 값 채택, 상태 배지 위치 통일 반영. 컨테이너 `healthy`, 외부에서 `/api/health` 정상, 새 `compare.js`·`app.css`(`.cmp-adopt`, 고정 폭 배지) 제공 확인.
 - AWS 재배포(2026-10-01, dev `a2f442a`): 문서 활성·비활성, 범위별 집계·내보내기, 페이지네이션 반영. 첫 시도는 Apple Silicon 기본 빌드(arm64) 이미지라 컨테이너가 unhealthy로 떠 잠시 중단됐고, `--platform linux/amd64`로 다시 빌드해 `healthy`로 복구했다. `deploy.sh`가 amd64로 빌드하고 아키텍처를 검사하도록 고쳤다. 외부에서 `/api/health` 정상, 기존 번들 29건 모두 활성·`summary_by_scope` 응답, `bundle.zip?scope=enabled` 200(55MB), `golden.xlsx?scope=disabled` 200 확인(데이터 변경 없음).
+- AWS 재배포(2026-10-01, dev `a73c636`): 상세 화면 활성 토글 반영. 수정한 `deploy.sh`로 amd64 빌드, 컨테이너 `healthy`. 외부에서 `/api/health` 정상, 새 `detail.js`(활성 토글) 제공 확인.
 - 외부 접속: 배포 직후 외부 요청은 타임아웃이었다. 서버에 firewalld가 없으므로 보안그룹 인바운드 TCP 8765를 열어야 한다.
 
 ## 외부 노출 주의

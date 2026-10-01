@@ -145,3 +145,6 @@ status: active
 
 ### Update
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `a2f442a` 재배포(문서 활성·비활성·페이지네이션), arm64 이미지로 인한 일시 중단과 `deploy.sh` amd64 고정 기록.
+
+### Update
+- [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `a73c636` 재배포(상세 화면 활성 토글) 이력 추가.
