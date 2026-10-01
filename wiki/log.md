@@ -148,3 +148,6 @@ status: active
 
 ### Update
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `a73c636` 재배포(상세 화면 활성 토글) 이력 추가.
+
+### Update
+- [Label Viewer 비교 탭 사용성 개선](2026-09-29-compare-tab-usability.md): 표 `#행` 소그룹 헤더의 대표 값·불일치 수를 필터 전 행 전체 기준으로 수정(2026-10-01, `fix/rowgroup-label`).

@@ -318,12 +318,13 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
 
   // 표 항목을 #행 소그룹으로 묶는다. 헤더는 행 번호·대표 값(첫 열 Golden, 없으면 AO/Harness)·불일치 수를 보여주고 접을 수 있다.
   // 기본은(첫 등장 시) 불일치가 있는 행만 펼친다. 이후 사용자가 토글한 상태는 draw 사이(collapsedRows) 유지한다.
-  function buildRowGroup(tbody, rowEntries) {
+  // 대표 값·불일치 수는 필터와 무관하게 행 전체(allEntries)로 정하고, 펼친 본문은 필터를 통과한 rowEntries만 보여준다.
+  function buildRowGroup(tbody, rowEntries, allEntries) {
     const rowKey = rowKeyOf(rowEntries[0]);
-    const mismatchCount = rowEntries.filter(isMismatch).length;
+    const mismatchCount = allEntries.filter(isMismatch).length;
     if (!rowSeen.has(rowKey)) { rowSeen.add(rowKey); if (mismatchCount === 0) collapsedRows.add(rowKey); }
     const collapsed = collapsedRows.has(rowKey);
-    const first = rowEntries[0];
+    const first = allEntries[0];
     const firstGolden = pending.has(first.path) ? pending.get(first.path) : first.golden;
     const repVal = (firstGolden != null && firstGolden !== '') ? firstGolden : (first.ao != null && first.ao !== '' ? first.ao : first.harness);
     const tr = el('tr', { class: `cmp-rowgroup${collapsed ? ' collapsed' : ''}`, tabindex: collapsed ? '0' : null, dataset: { rowkey: rowKey },
@@ -403,6 +404,13 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
 
     const filtered = list.filter((e) => matchesFilter(e, state.filter, state.source) && matchesSearch(e, q));
     const groups = new Map();
+    const fullRows = new Map();
+    for (const e of list) {
+      if (e.area !== 'table') continue;
+      const rk = rowKeyOf(e);
+      if (!fullRows.has(rk)) fullRows.set(rk, []);
+      fullRows.get(rk).push(e);
+    }
     for (const e of filtered) {
       const gk = `${e.area}::${e.container || ''}`;
       if (!groups.has(gk)) groups.set(gk, []);
@@ -426,7 +434,7 @@ export function renderCompare(host, doc, { onAdopt, onHoverBbox, onGoToEdit } = 
             if (!rowGroups.has(rk)) rowGroups.set(rk, []);
             rowGroups.get(rk).push(e);
           }
-          for (const rowEntries of rowGroups.values()) buildRowGroup(tbody, rowEntries);
+          for (const [rk, rowEntries] of rowGroups) buildRowGroup(tbody, rowEntries, fullRows.get(rk));
         } else {
           for (const e of rows) tbody.appendChild(buildEntryRow(e));
         }
