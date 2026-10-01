@@ -1,4 +1,4 @@
-import { el, mount, debounce, clear, fmtPct, scoreCard, icon, menuButton, mismatchBadge, classBadges, getDocTypeFilter, matchDocType, docTypeSelect } from './util.js';
+import { el, mount, debounce, clear, fmtPct, scoreCard, icon, menuButton, mismatchBadge, classBadges, getDocTypeFilter, matchDocType, docTypeSelect, toast } from './util.js';
 import { api } from './api.js';
 import { navigate } from './router.js';
 
@@ -49,8 +49,27 @@ function thumbImg(bundleId, doc) {
   return wrap;
 }
 
+const PAGE_SIZES = [50, 100, 200];
+const SCOPES = [['all', '전체'], ['enabled', '활성'], ['disabled', '비활성']];
+
+function readPageSize() {
+  try { const n = Number(localStorage.getItem('lv.pageSize')); return PAGE_SIZES.includes(n) ? n : PAGE_SIZES[0]; } catch (e) { return PAGE_SIZES[0]; }
+}
+
+// 번호 목록: 처음·끝과 현재 주변 2쪽, 사이는 '…'.
+function pageNumbers(cur, last) {
+  const out = [];
+  for (let i = 1; i <= last; i += 1) {
+    if (i === 1 || i === last || Math.abs(i - cur) <= 2) out.push(i);
+    else if (out[out.length - 1] !== '…') out.push('…');
+  }
+  return out;
+}
+
 export function renderList(root, bundleId) {
-  const state = { bundle: null, filter: 'all', q: '', view: 'grid', loading: true, error: null };
+  // scope: 집계·목록 범위(전체/활성/비활성). selected 는 페이지·필터를 넘어 유지한다.
+  const state = { bundle: null, filter: 'all', q: '', view: 'grid', scope: 'all', page: 1, pageSize: readPageSize(),
+    selected: new Set(), anchor: null, busy: false, loading: true, error: null };
 
   const screen = el('div', { class: 'list-screen' });
   mount(root, screen);
@@ -64,9 +83,13 @@ export function renderList(root, bundleId) {
       .catch((e) => { state.error = e.message; state.loading = false; draw(); });
   }
 
+  const scopeSummary = () => (state.scope === 'all' ? state.bundle.summary : state.bundle.summary_by_scope[state.scope]);
+
   function filteredDocs() {
     if (!state.bundle) return [];
     let docs = state.bundle.docs;
+    if (state.scope === 'enabled') docs = docs.filter((d) => d.enabled);
+    else if (state.scope === 'disabled') docs = docs.filter((d) => !d.enabled);
     if (state.filter === 'golden') docs = docs.filter((d) => d.has.golden);
     else if (state.filter === 'nogolden') docs = docs.filter((d) => !d.has.golden);
     else if (state.filter === 'done') docs = docs.filter((d) => d.review === 'done');
@@ -95,8 +118,8 @@ export function renderList(root, bundleId) {
     ];
     return el('div', { class: 'filter-row' }, [
       ...defs.map(([key, label, n]) => el('button', { class: `chip ${state.filter === key ? 'active' : ''}`,
-        onclick: () => { state.filter = key; draw(); } }, [label, el('span', { class: 'n' }, String(n))])),
-      docTypeSelect(state.bundle.docs, bundleId, draw, 'doctype-filter'),
+        onclick: () => { state.filter = key; state.page = 1; draw(); } }, [label, el('span', { class: 'n' }, String(n))])),
+      docTypeSelect(state.bundle.docs, bundleId, () => { state.page = 1; draw(); }, 'doctype-filter'),
       el('div', { class: 'seg view-seg' }, [
         el('button', { class: state.view === 'grid' ? 'active' : '', onclick: () => { state.view = 'grid'; draw(); }, title: '썸네일', 'aria-label': '썸네일 보기' }, icon('grid')),
         el('button', { class: state.view === 'list' ? 'active' : '', onclick: () => { state.view = 'list'; draw(); }, title: '목록', 'aria-label': '목록 보기' }, icon('list')),
@@ -104,11 +127,42 @@ export function renderList(root, bundleId) {
     ]);
   }
 
-  function exportMenu() {
-    return menuButton('내보내기', [
-      el('a', { href: api.exportGoldenXlsxUrl(bundleId) }, [el('b', {}, 'Excel'), el('span', {}, '요약·필드·표·비교 시트')]),
-      el('a', { href: api.exportBundleZipUrl(bundleId) }, [el('b', {}, '전체 묶음 ZIP'), el('span', {}, '원본·전처리 이미지, AO·Harness·Golden JSON')]),
+  function scopeSeg() {
+    const by = state.bundle.summary_by_scope;
+    const n = { all: state.bundle.summary.docs, enabled: by.enabled.docs, disabled: by.disabled.docs };
+    return el('div', { class: 'scope-row' }, [
+      el('span', { class: 'scope-label' }, '집계 범위'),
+      el('div', { class: 'seg' }, SCOPES.map(([key, label]) => el('button', { class: state.scope === key ? 'active' : '',
+        onclick: () => { state.scope = key; state.page = 1; draw(); } }, [label, el('span', { class: 'n' }, ` ${n[key]}`)]))),
+      el('span', { class: 'hint' }, '내보내기는 활성·비활성 목록을 따로 받습니다.'),
     ]);
+  }
+
+  function exportMenu() {
+    const by = state.bundle.summary_by_scope;
+    const item = (href, n, title, desc) => (n
+      ? el('a', { href }, [el('b', {}, title), el('span', {}, desc)])
+      : el('div', { class: 'export-item disabled', title: '해당 문서가 없습니다' }, [el('b', {}, title), el('span', {}, '문서 없음')]));
+    const group = (scope, label) => {
+      const n = by[scope].docs;
+      return [
+        el('div', { class: 'export-group' }, `${label} 목록 · ${n}건`),
+        item(api.exportGoldenXlsxUrl(bundleId, null, scope), n, 'Excel', '요약·필드·표·비교 시트'),
+        item(api.exportBundleZipUrl(bundleId, null, scope), n, '전체 묶음 ZIP', '원본·전처리 이미지, AO·Harness·Golden JSON'),
+      ];
+    };
+    return menuButton('내보내기', [...group('enabled', '활성'), ...group('disabled', '비활성')]);
+  }
+
+  function applyEnabled(enabled) {
+    const ids = [...state.selected];
+    if (!ids.length || state.busy) return;
+    state.busy = true; draw();
+    api.setEnabled(bundleId, ids, enabled).then((b) => {
+      state.bundle = b; state.selected.clear(); state.anchor = null;
+      toast(`${ids.length}건을 ${enabled ? '활성화' : '비활성화'}했습니다.`);
+    }).catch((e) => toast(e.message, 'error'))
+      .finally(() => { state.busy = false; draw(); });
   }
 
   function draw() {
@@ -123,12 +177,12 @@ export function renderList(root, bundleId) {
       el('label', { class: 'search-box' }, [
         icon('search'),
         el('input', { type: 'search', placeholder: '문서 ID나 유형으로 찾기', value: state.q,
-          oninput: debounce((e) => { state.q = e.target.value; drawGrid(); }, 150) }),
+          oninput: debounce((e) => { state.q = e.target.value; state.page = 1; drawGrid(); }, 150) }),
       ]),
       exportMenu(),
     ]);
 
-    const summary = b.summary;
+    const summary = scopeSummary();
     const sc = summary.score || {};
     const delta = sc.ao && sc.harness && sc.ao.accuracy != null && sc.harness.accuracy != null
       ? (sc.harness.accuracy - sc.ao.accuracy) * 100 : null;
@@ -148,45 +202,102 @@ export function renderList(root, bundleId) {
     ]);
 
     const gridHost = el('div');
-    mount(screen, [topbar, el('div', { class: 'list-body' }, [overview, chips(summary), gridHost])]);
+    mount(screen, [topbar, el('div', { class: 'list-body' }, [scopeSeg(), overview, chips(summary), gridHost])]);
     drawGrid();
 
     function drawGrid() {
       const docs = filteredDocs();
+      const last = Math.max(1, Math.ceil(docs.length / state.pageSize));
+      state.page = Math.min(Math.max(1, state.page), last);
+      const from = (state.page - 1) * state.pageSize;
+      const pageDocs = docs.slice(from, from + state.pageSize);
+      const open = (d) => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(d.id)}`);
+
+      // Shift+클릭은 마지막으로 누른 문서부터 현재 필터 결과 순서대로 범위를 같은 상태로 맞춘다.
+      const toggle = (d, e) => {
+        e.stopPropagation();
+        const on = !state.selected.has(d.id);
+        const ids = docs.map((x) => x.id);
+        const a = e.shiftKey && state.anchor ? ids.indexOf(state.anchor) : -1;
+        const z = ids.indexOf(d.id);
+        const range = a >= 0 ? ids.slice(Math.min(a, z), Math.max(a, z) + 1) : [d.id];
+        range.forEach((id) => (on ? state.selected.add(id) : state.selected.delete(id)));
+        state.anchor = d.id;
+        drawGrid();
+      };
+      const check = (d) => el('label', { class: 'doc-check', title: '선택 (Shift: 범위)', onclick: (e) => e.stopPropagation() },
+        el('input', { type: 'checkbox', checked: state.selected.has(d.id), 'aria-label': `${d.id} 선택`, onclick: (e) => toggle(d, e) }));
+      const offBadge = (d) => (d.enabled ? null : el('span', { class: 'badge badge-muted badge-off' }, '비활성'));
+
+      const pageAll = pageDocs.length > 0 && pageDocs.every((d) => state.selected.has(d.id));
+      const nSel = state.selected.size;
+      const toolbar = el('div', { class: 'select-bar' }, [
+        el('label', { class: 'sel-page' }, [
+          el('input', { type: 'checkbox', checked: pageAll, disabled: !pageDocs.length, onchange: (e) => {
+            pageDocs.forEach((d) => (e.target.checked ? state.selected.add(d.id) : state.selected.delete(d.id))); drawGrid();
+          } }), '이 페이지 선택']),
+        el('button', { class: 'btn ghost sm', disabled: !docs.length, onclick: () => { docs.forEach((d) => state.selected.add(d.id)); drawGrid(); } }, `결과 전체 선택 (${docs.length})`),
+        nSel ? el('button', { class: 'btn ghost sm', onclick: () => { state.selected.clear(); state.anchor = null; drawGrid(); } }, '선택 해제') : null,
+        el('div', { class: 'grow' }),
+        el('span', { class: 'sel-count' }, nSel ? `${nSel}건 선택됨` : '문서를 선택하세요'),
+        el('button', { class: 'btn sm', disabled: !nSel || state.busy, onclick: () => applyEnabled(true) }, '활성화'),
+        el('button', { class: 'btn sm', disabled: !nSel || state.busy, onclick: () => applyEnabled(false) }, '비활성화'),
+      ]);
+
       if (!docs.length) {
-        mount(gridHost, el('div', { class: 'empty' }, [
+        mount(gridHost, [toolbar, el('div', { class: 'empty' }, [
           icon('search'),
           el('div', { class: 'empty-title' }, '조건에 맞는 문서가 없습니다'),
           el('div', { class: 'empty-desc' }, '필터나 검색어를 바꿔 보세요.'),
-        ]));
+        ])]);
         return;
       }
+      let body;
       if (state.view === 'grid') {
-        mount(gridHost, el('div', { class: 'doc-grid' }, docs.map((d) => {
-          const card = el('div', { class: 'doc-card', onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(d.id)}`) }, [
-            thumbImg(bundleId, d),
-            el('div', { class: 'doc-info' }, [
-              el('div', { class: 'doc-info-head' }, [el('span', { class: 'doc-id' }, d.id), reviewBadge(d.review)]),
-              el('div', { class: 'doc-type' }, d.doc_type || '문서 유형 없음'),
-              mismatchBadge(d.doc_type_mismatch),
-              classBadges(d.classification),
-              docBadges(d.has),
-              d.errors && d.errors.length ? el('span', { class: 'badge badge-bad', title: d.errors.join('\n') }, `오류 ${d.errors.length}`) : null,
-              accBars(d.score),
-            ]),
-          ]);
-          return card;
-        })));
+        body = el('div', { class: 'doc-grid' }, pageDocs.map((d) => el('div', { class: `doc-card ${d.enabled ? '' : 'is-disabled'} ${state.selected.has(d.id) ? 'is-selected' : ''}`, onclick: () => open(d) }, [
+          check(d),
+          thumbImg(bundleId, d),
+          el('div', { class: 'doc-info' }, [
+            el('div', { class: 'doc-info-head' }, [el('span', { class: 'doc-id' }, d.id), offBadge(d), reviewBadge(d.review)]),
+            el('div', { class: 'doc-type' }, d.doc_type || '문서 유형 없음'),
+            mismatchBadge(d.doc_type_mismatch),
+            classBadges(d.classification),
+            docBadges(d.has),
+            d.errors && d.errors.length ? el('span', { class: 'badge badge-bad', title: d.errors.join('\n') }, `오류 ${d.errors.length}`) : null,
+            accBars(d.score),
+          ]),
+        ])));
       } else {
-        mount(gridHost, el('div', {}, docs.map((d) => el('div', { class: 'doc-list-row', onclick: () => navigate(`#/b/${encodeURIComponent(bundleId)}/d/${encodeURIComponent(d.id)}`) }, [
+        body = el('div', {}, pageDocs.map((d) => el('div', { class: `doc-list-row ${d.enabled ? '' : 'is-disabled'} ${state.selected.has(d.id) ? 'is-selected' : ''}`, onclick: () => open(d) }, [
+          check(d),
           el('span', { class: 'doc-id' }, d.id),
           docBadges(d.has),
           el('span', { class: 'doc-type' }, d.doc_type || '—'),
           mismatchBadge(d.doc_type_mismatch),
           classBadges(d.classification),
-          reviewBadge(d.review),
-        ]))));
+          el('span', { class: 'row-badges' }, [offBadge(d), reviewBadge(d.review)]),
+        ])));
       }
+      mount(gridHost, [toolbar, body, pager(docs.length, last)]);
+    }
+
+    function pager(total, last) {
+      const go = (n) => { state.page = n; drawGrid(); gridHost.scrollIntoView({ block: 'start' }); };
+      const from = (state.page - 1) * state.pageSize + 1;
+      return el('nav', { class: 'pager', 'aria-label': '페이지' }, [
+        el('span', { class: 'pager-range' }, `${from.toLocaleString()}–${Math.min(total, from + state.pageSize - 1).toLocaleString()} / ${total.toLocaleString()}건`),
+        el('div', { class: 'pager-pages' }, [
+          el('button', { class: 'btn ghost sm icon', disabled: state.page <= 1, 'aria-label': '이전 페이지', onclick: () => go(state.page - 1) }, icon('chevron-left')),
+          ...pageNumbers(state.page, last).map((n) => (n === '…' ? el('span', { class: 'pager-gap' }, '…')
+            : el('button', { class: `btn ghost sm ${n === state.page ? 'active' : ''}`, 'aria-current': n === state.page ? 'page' : null, onclick: () => go(n) }, String(n)))),
+          el('button', { class: 'btn ghost sm icon', disabled: state.page >= last, 'aria-label': '다음 페이지', onclick: () => go(state.page + 1) }, icon('chevron-right')),
+        ]),
+        el('select', { class: 'pager-size', 'aria-label': '페이지당 문서 수', onchange: (e) => {
+          state.pageSize = Number(e.target.value); state.page = 1;
+          try { localStorage.setItem('lv.pageSize', String(state.pageSize)); } catch (err) { /* 저장 불가 환경 */ }
+          drawGrid();
+        } }, PAGE_SIZES.map((n) => el('option', { value: String(n), selected: n === state.pageSize }, `${n}개씩`))),
+      ]);
     }
   }
 

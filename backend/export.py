@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import io
+import tempfile
 import zipfile
 from pathlib import Path
+from typing import BinaryIO
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -20,21 +22,35 @@ _STATUS_FILL = {
 }
 
 
-def export_bundle_zip(data_dir: Path, bundle_id: str, doc_id: str | None = None) -> bytes:
-    """원본·전처리 이미지와 AO·Harness·Golden JSON을 업로드 폴더 구조 그대로 묶는다. doc_id가 있으면 그 문서만."""
+_STORED_EXTS = {".png", ".jpg", ".jpeg", ".webp"}  # 이미 압축된 이미지는 다시 deflate 하지 않는다
+
+
+def export_bundle_zip(data_dir: Path, bundle_id: str, doc_id: str | None = None,
+                      scope: str = "enabled") -> BinaryIO:
+    """원본·전처리 이미지와 AO·Harness·Golden JSON을 업로드 폴더 구조 그대로 묶는다.
+    doc_id가 있으면 그 문서만, 없으면 scope(활성·비활성) 문서만. 수천 건이면 수 GB라 메모리 대신 임시 파일에 쓴다."""
     bdir = B.bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
         raise B.ApiError(404, "bundle not found")
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for kind in (*B.DOC_KINDS, "ao_ui"):
-            d = bdir / kind
-            if not d.is_dir():
-                continue
-            for p in sorted(d.iterdir()):
-                if p.is_file() and not p.name.startswith(".") and (doc_id is None or p.stem == doc_id):
-                    zf.write(p, arcname=f"{kind}/{p.name}")
-    return buf.getvalue()
+    wanted = {doc_id} if doc_id is not None else set(B.scope_doc_ids(data_dir, bundle_id, scope))
+    tmp_dir = B.cache_root(data_dir) / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    out = tempfile.TemporaryFile(dir=tmp_dir)
+    try:
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            for kind in (*B.DOC_KINDS, "ao_ui"):
+                d = bdir / kind
+                if not d.is_dir():
+                    continue
+                for p in sorted(d.iterdir()):
+                    if p.is_file() and not p.name.startswith(".") and p.stem in wanted:
+                        ctype = zipfile.ZIP_STORED if p.suffix.lower() in _STORED_EXTS else zipfile.ZIP_DEFLATED
+                        zf.write(p, arcname=f"{kind}/{p.name}", compress_type=ctype)
+    except BaseException:
+        out.close()
+        raise
+    out.seek(0)
+    return out
 
 
 _OX = {True: "O", False: "X", None: ""}
@@ -44,9 +60,8 @@ def _cell_val(v) -> str:
     return "" if v is None else ILLEGAL_CHARACTERS_RE.sub("", str(v))  # OCR 값의 제어문자는 xlsx에 쓸 수 없다
 
 
-def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None) -> bytes:
-    bview = B.bundle_view(data_dir, bundle_id)
-    doc_ids = [d["id"] for d in bview["docs"]] if doc_id is None else [doc_id]
+def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None, scope: str = "enabled") -> bytes:
+    doc_ids = B.scope_doc_ids(data_dir, bundle_id, scope) if doc_id is None else [doc_id]
 
     wb = Workbook()
     ws_summary = wb.active

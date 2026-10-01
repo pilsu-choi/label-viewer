@@ -13,6 +13,7 @@ status: active
 
 ## 문서
 
+- [2026-10-01 문서 활성·비활성, 범위별 집계·내보내기, 목록 페이지네이션](2026-10-01-doc-enable-pagination.md)
 - [2026-09-29 문서 유형 필터와 편집 탭 표 다중 셀 일괄 입력](2026-09-29-doctype-filter-multicell.md)
 - [2026-09-30 전체 묶음 ZIP 내보내기](2026-09-30-bundle-export-zip.md)
 - [2026-09-30 한글 파일명 ZIP 인식과 업로드·조회 오류 전수 점검](2026-09-30-korean-filename-upload-hardening.md)

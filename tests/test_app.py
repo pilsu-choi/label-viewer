@@ -314,6 +314,56 @@ def test_export_xlsx(client: TestClient, bundle: dict):
     assert wb["요약"].max_row >= 2
 
 
+def test_enable_disable_docs(client: TestClient, bundle: dict):
+    bid = bundle["id"]
+    ids = [d["id"] for d in bundle["docs"]]
+    assert all(d["enabled"] for d in bundle["docs"])
+    assert bundle["summary_by_scope"]["disabled"]["docs"] == 0
+
+    off = ids[:2]
+    r = client.put(f"/api/bundles/{bid}/enabled", json={"ids": off, "enabled": False})
+    assert r.status_code == 200
+    view = r.json()
+    assert [d["id"] for d in view["docs"] if not d["enabled"]] == off
+    by = view["summary_by_scope"]
+    assert by["disabled"]["docs"] == 2 and by["enabled"]["docs"] == len(ids) - 2
+    assert view["summary"]["docs"] == len(ids)
+    assert client.get(f"/api/bundles/{bid}/docs/{off[0]}").json()["enabled"] is False
+
+    # 활성·비활성 ZIP 은 서로 겹치지 않는다
+    def zip_docs(scope):
+        r = client.get(f"/api/bundles/{bid}/export/bundle.zip", params={"scope": scope})
+        assert r.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+            return {Path(n).stem for n in zf.namelist()}
+    assert zip_docs("disabled") == set(off)
+    assert zip_docs("enabled") == set(ids) - set(off)
+    r = client.get(f"/api/bundles/{bid}/export/bundle.zip", params={"scope": "nope"})
+    assert r.status_code == 422
+
+    def xlsx_docs(scope):
+        r = client.get(f"/api/bundles/{bid}/export/golden.xlsx", params={"scope": scope})
+        ws = load_workbook(io.BytesIO(r.content))["요약"]
+        return {row[0] for row in ws.iter_rows(min_row=2, values_only=True)} - {"합계"}
+    assert xlsx_docs("disabled") == set(off)
+    assert xlsx_docs("enabled") == set(ids) - set(off)
+
+    # 문서 단위 내보내기는 활성 여부와 무관
+    r = client.get(f"/api/bundles/{bid}/export/bundle.zip", params={"doc": off[0]})
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        assert zf.namelist()
+
+    # 검수 상태 변경이 활성 여부를 지우지 않는다(같은 _state.json)
+    client.put(f"/api/bundles/{bid}/docs/{off[0]}/review", json={"review": "done"})
+    view = client.put(f"/api/bundles/{bid}/enabled", json={"ids": [off[1]], "enabled": True}).json()
+    assert [d["id"] for d in view["docs"] if not d["enabled"]] == [off[0]]
+    assert view["summary_by_scope"]["disabled"]["reviewed"] == 1
+
+    assert client.put(f"/api/bundles/{bid}/enabled", json={"ids": ["없는문서"], "enabled": False}).status_code == 404
+    assert client.put(f"/api/bundles/{bid}/enabled", json={"ids": off[0], "enabled": False}).status_code == 422
+    assert client.put(f"/api/bundles/{bid}/enabled", json={"ids": off, "enabled": "no"}).status_code == 422
+
+
 # ── images ───────────────────────────────────────────────────────────────
 
 def test_image_endpoints(client: TestClient, bundle: dict):

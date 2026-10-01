@@ -139,3 +139,6 @@ status: active
 - [Label Viewer Docker Compose·AWS 배포](2026-09-29-docker-aws-deploy.md): dev `9f77944` 재배포(비교 탭 채택 UX·배지 위치) 이력 추가.
 - [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): dev `b7a3a2f` 기준 번들 `0.1.0-20260930-b7a3a2f` 재빌드, 이전 번들 `01c2fb9` 삭제.
 - [Label Viewer 폐쇄망 k8s 반입 번들](2026-09-29-k8s-offline-bundle.md): 번들 위치를 `미래에셋` 폴더 바로 아래로 정정(`for_nas_patch_folder.md` 기준).
+
+### Creation
+- [문서 활성·비활성, 범위별 집계·내보내기, 목록 페이지네이션](2026-10-01-doc-enable-pagination.md): 문서 다중 활성·비활성, 활성/비활성 범위별 정확도·Excel·ZIP, 목록 50/100/200·레일 100건 페이지, ZIP 임시 파일 스트리밍, 문서 요약 캐시 분리.
