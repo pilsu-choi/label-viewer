@@ -23,7 +23,9 @@ echo "▶ 이미지 빌드: label-viewer:${TAG} (linux/amd64)"
 docker build --platform linux/amd64 -t "label-viewer:${TAG}" "$ROOT"
 
 rm -rf "$STAGE"; mkdir -p "${STAGE}/images"
-docker save --platform linux/amd64 -o "${STAGE}/images/label-viewer_${TAG}.tar" "label-viewer:${TAG}"
+# 구버전 docker 는 save --platform 이 없다. 이미지는 위에서 amd64 단일 플랫폼으로 빌드됐으므로 빼도 같다
+SAVE=(docker save); docker save --help 2>/dev/null | grep -q -- --platform && SAVE+=(--platform linux/amd64)
+"${SAVE[@]}" -o "${STAGE}/images/label-viewer_${TAG}.tar" "label-viewer:${TAG}"
 cp -r "${SRC}/bundle/"* "${STAGE}/"; cp -r "$SRC" "${STAGE}/k8s"; rm -rf "${STAGE}/k8s/bundle" "${STAGE}/k8s/build-bundle.sh"
 sed -i.bak "s/newTag: .*/newTag: ${TAG}/" "${STAGE}/k8s/kustomization.yaml" && rm "${STAGE}/k8s/kustomization.yaml.bak"
 cat > "${STAGE}/VERSION" <<V
