@@ -1,5 +1,6 @@
 import { el, clear, mount, debounce, toast, statusLabel, icon, menuButton, josa, isMismatch, hasSourceValue, entryState } from './util.js';
 import { api } from './api.js';
+import { openGoldenHistory, showGoldenConflictDialog } from './goldenHistory.js';
 import { cellDisplay } from './reconstruct.js';
 
 const DTYPES = ['string', 'int', 'float', 'number', 'date', 'bool'];
@@ -88,6 +89,11 @@ export function createGoldenEditor(host, opts) {
   let saveQueue = Promise.resolve();
   let destroyed = false;
   let deleting = false;
+  let restoring = false;
+  let conflictPaused = false;
+  let closeConflictDialog = null;
+  let closeHistoryDialog = null;
+  let conflictButton = null;
   let autosave = true;
   let advanced = false;
   let collapsedGroups = new Set();
@@ -98,7 +104,7 @@ export function createGoldenEditor(host, opts) {
   let mismatchCursor = -1; // focusMismatch 가 마지막으로 이동한 위치(버튼 클릭 시 포커스가 버튼으로 옮겨가므로 activeElement 로는 추적 불가)
   const listeners = { dirty: opts.onDirtyChange || (() => {}), start: opts.onSaveStart || (() => {}), ok: opts.onSaveOk || (() => {}), err: opts.onSaveErr || (() => {}) };
 
-  const debouncedSave = debounce(() => { if (!destroyed && !deleting && autosave) doSave(); }, 1500);
+  const debouncedSave = debounce(() => { if (!destroyed && !deleting && !restoring && !conflictPaused && autosave) doSave(); }, 1500);
 
   const updateSummaryLater = debounce(() => updateSummary(), 150);
   function markDirty() {
@@ -149,23 +155,89 @@ export function createGoldenEditor(host, opts) {
   }
 
   function doSave() {
-    if (destroyed || deleting || !golden) return Promise.resolve();
+    if (destroyed || deleting || restoring || conflictPaused || !golden) return Promise.resolve({ ok: false });
     const revision = editRevision;
     const snapshot = structuredClone(golden);
     const task = saveQueue.catch(() => {}).then(() => {
+      if (conflictPaused) return { ok: false, conflict: true };
       if (!destroyed) listeners.start();
-      return api.putGolden(bundleId, docId, snapshot).then((res) => {
+      return api.putGolden(bundleId, docId, snapshot, doc.golden_revision).then((res) => {
         doc = res; cmap = compareMap(doc.compare);
         dirty = editRevision !== revision;
         if (destroyed) return;
         listeners.dirty(dirty);
         listeners.ok(res);
         if (!host.contains(document.activeElement) || !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) render();
-        if (dirty && autosave) debouncedSave();
+        if (dirty && autosave && !conflictPaused && !restoring) debouncedSave();
+        return { ok: true, dirty };
       });
-    }).catch((e) => { if (!destroyed) { listeners.err(e); toast(`저장 실패: ${e.message}`, 'error'); } });
+    }).catch((e) => {
+      if (destroyed) return { ok: false, error: e };
+      if (e.status === 409) {
+        conflictPaused = true;
+        listeners.err(e);
+        openConflictDialog();
+        return { ok: false, conflict: true };
+      }
+      listeners.err(e); toast(`저장 실패: ${e.message}`, 'error');
+      return { ok: false, error: e };
+    });
     saveQueue = task;
     return task;
+  }
+
+  function downloadLocalGolden() {
+    const blob = new Blob([JSON.stringify(golden, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = el('a', { href: url, download: `${docId}.golden.local.json` });
+    document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function openConflictDialog() {
+    if (destroyed || closeConflictDialog) return;
+    if (conflictButton) conflictButton.style.display = '';
+    closeConflictDialog = showGoldenConflictDialog({
+      onDownload: downloadLocalGolden,
+      onReload: async () => {
+        const latest = await api.getDoc(bundleId, docId);
+        if (destroyed) return;
+        doc = latest; golden = latest.golden ? structuredClone(latest.golden) : null;
+        cmap = compareMap(doc.compare); dirty = false; editRevision += 1; conflictPaused = false;
+        listeners.dirty(false); render(); opts.onGoldenRemoteChange?.(latest);
+      },
+      onClose: () => { closeConflictDialog = null; },
+    });
+  }
+
+  function openHistory() {
+    closeHistoryDialog?.();
+    closeHistoryDialog = openGoldenHistory({
+      bundleId, docId, isDirty: () => dirty,
+      onRestore: async (historyId, disposition) => {
+        if (restoring || deleting || destroyed) return false;
+        if (disposition === 'save') {
+          const result = await doSave();
+          if (!result?.ok || dirty || conflictPaused) return false;
+        }
+        restoring = true; debouncedSave.cancel(); host.inert = true;
+        const task = saveQueue.catch(() => {}).then(() => api.restoreGolden(bundleId, docId, historyId, doc.golden_revision));
+        saveQueue = task;
+        try {
+          const updated = await task;
+          if (destroyed) return true;
+          doc = { ...doc, ...updated, has: { ...doc.has, ...updated.has } };
+          golden = doc.golden ? structuredClone(doc.golden) : null;
+          cmap = compareMap(doc.compare); dirty = false; editRevision += 1; conflictPaused = false;
+          listeners.dirty(false); render(); opts.onGoldenRemoteChange?.(doc); toast('선택한 Golden 버전을 복원했습니다.');
+          return true;
+        } catch (e) {
+          if (!destroyed && e.status === 409) { conflictPaused = true; openConflictDialog(); }
+          else if (!destroyed) toast(`복원 실패: ${e.message}`, 'error');
+          return false;
+        } finally { restoring = false; host.inert = false; }
+      },
+    });
   }
 
   function ensureDoc0() {
@@ -195,6 +267,8 @@ export function createGoldenEditor(host, opts) {
       el('span', { class: 'hint' }, '1.5초 뒤 저장'),
       el('div', { class: 'grow' }),
       summaryEl,
+      (conflictButton = el('button', { class: 'btn sm danger', style: conflictPaused ? '' : 'display:none', onclick: openConflictDialog }, '저장 충돌 해결')),
+      el('button', { class: 'btn sm', onclick: openHistory }, '버전 기록'),
       el('button', { class: 'btn ghost icon sm', title: '이전 불일치', 'aria-label': '이전 불일치', onclick: () => focusMismatch(-1) }, icon('chevron-left')),
       el('button', { class: 'btn ghost icon sm', title: '다음 불일치 (M)', 'aria-label': '다음 불일치', onclick: () => focusMismatch(1) }, icon('chevron-right')),
       menuButton('', [
@@ -279,7 +353,12 @@ export function createGoldenEditor(host, opts) {
     const card = el('div', { class: 'gs-create-card' }, [
       el('h3', {}, 'Golden Set이 없습니다'),
       el('p', {}, '아래 소스로 초안을 만든 뒤 검수를 시작하세요.'),
+      el('button', { class: 'btn sm', onclick: openHistory }, '버전 기록'),
     ]);
+    if (conflictPaused) {
+      conflictButton = el('button', { class: 'btn sm danger', onclick: openConflictDialog }, '저장 충돌 해결');
+      card.appendChild(conflictButton);
+    }
     const optsHost = el('div', {});
     sources.forEach(([key, label, enabled]) => {
       const row = el('label', { class: `gs-source-opt ${enabled ? '' : 'disabled'}` }, [
@@ -300,11 +379,16 @@ export function createGoldenEditor(host, opts) {
     const m = doc.doc_type_mismatch;
     card.appendChild(el('button', { class: 'btn primary', onclick: () => {
       if (m && chosen === 'ao' && !docType && !confirm(`AO가 '${m.ao}' 양식으로 추출해 키가 실제 문서('${m.title}')와 다릅니다. Harness로 생성하길 권장합니다. 그래도 AO로 만들까요?`)) return;
-      api.createGolden(bundleId, docId, chosen, docType).then((res) => {
+      api.createGolden(bundleId, docId, chosen, docType, doc.golden_revision).then((res) => {
+        if (destroyed) return;
         doc = res; golden = null; cmap = compareMap(doc.compare);
         render(); toast('Golden Set을 생성했습니다.');
         opts.onGoldenCreated && opts.onGoldenCreated(res);
-      }).catch((e) => toast(`생성 실패: ${e.message}`, 'error'));
+      }).catch((e) => {
+        if (destroyed) return;
+        if (e.status === 409) { conflictPaused = true; openConflictDialog(); }
+        else toast(`생성 실패: ${e.message}`, 'error');
+      });
     } }, 'Golden 만들기'));
     return card;
   }
@@ -313,14 +397,16 @@ export function createGoldenEditor(host, opts) {
     if (deleting || !confirm('Golden Set을 삭제할까요?')) return;
     deleting = true;
     debouncedSave.cancel();
-    saveQueue = saveQueue.catch(() => {}).then(() => api.deleteGolden(bundleId, docId)).then(() => {
-      doc = { ...doc, golden: null }; golden = null; dirty = false; editRevision += 1;
+    saveQueue = saveQueue.catch(() => {}).then(() => api.deleteGolden(bundleId, docId, doc.golden_revision)).then((updated) => {
+      doc = updated || { ...doc, golden: null, golden_revision: 'missing', has: { ...doc.has, golden: false } };
+      golden = null; dirty = false; editRevision += 1;
       if (destroyed) return;
       listeners.dirty(false); render();
       toast('Golden Set을 삭제했습니다.');
       opts.onGoldenCreated && opts.onGoldenCreated(doc);
     }).catch((e) => {
-      if (!destroyed) toast(e.message, 'error');
+      if (!destroyed && e.status === 409) { conflictPaused = true; openConflictDialog(); }
+      else if (!destroyed) toast(e.message, 'error');
     }).finally(() => {
       deleting = false;
       if (!destroyed && dirty && autosave) debouncedSave();
@@ -672,6 +758,7 @@ export function createGoldenEditor(host, opts) {
 
   return {
     isDirty: () => dirty,
+    hasConflict: () => conflictPaused,
     isAutosaveOn: () => autosave,
     save: () => { debouncedSave.cancel(); return doSave(); },
     addField: () => addFieldTop(),
@@ -691,7 +778,10 @@ export function createGoldenEditor(host, opts) {
       if (!advanced) render();
       return prev;
     },
-    destroy: () => { destroyed = true; debouncedSave.cancel(); updateSummaryLater.cancel(); hideTip(); },
+    destroy: () => {
+      destroyed = true; debouncedSave.cancel(); updateSummaryLater.cancel(); hideTip();
+      closeConflictDialog?.(); closeHistoryDialog?.();
+    },
   };
 }
 

@@ -45,3 +45,5 @@ status: active
 - [작업 기록](log.md)
 
 - [엑셀 내보내기·잠재 오류 수정과 전체 번들 목록](2026-10-03-export-audit-bundle-list.md)
+
+- [내보내기 진행률·선택 문서와 Golden 이력·충돌 감지](2026-10-03-review-tools.md)

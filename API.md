@@ -132,6 +132,7 @@ storage/bundles/{bundle_id}/
 ```json
 {"id":"","has":{...},"errors":[],"review":"","enabled":true,
  "pages":{"original":1,"preprocessed":0},
+ "golden_revision":"SHA-256|missing",
  "golden":{...}|null, "ao":{...}|null, "harness":{...}|null,
  "compare":[{"path":"documents[0].groups[환자정보].fields[성명]","doc":0,"area":"field|group|table",
    "container":"환자정보","row":"","key":"성명","dtype":"string",
@@ -180,3 +181,40 @@ openpyxl. 시트:
 - `표`: 표마다 헤더 행(문서·표 이름·headers…) 뒤에 행을 펼쳐 쓴다(한 행 = 표의 한 행, 열 = headers). 표 사이에 빈 줄.
 - `비교`: compare 셀 전체. 문서, path, 구역, 그룹/표, 행, key, Golden, AO, AO 상태, Harness, Harness 상태.
 상태 셀은 색(MATCH 초록, MISMATCH 빨강, MISSING 주황, EXTRA 보라, TYPE_MISMATCH 노랑)을 칠한다.
+
+
+## 내보내기 작업과 Golden 이력 (2026-10-03)
+
+### POST /api/bundles/{id}/exports
+
+본문: `{"format":"xlsx|zip","scope":"enabled|disabled","ids":["doc_id",...]}`. `ids`는 생략할 수 있으며, 지정하면 활성 여부와 무관하게 그 문서만 자연 순서로 내보낸다. 중복 ID는 제거한다. 빈 선택·형식 오류는 422, 없는 문서는 404, 대기 작업 한도 초과는 429. 기본 범위는 enabled.
+
+202 응답: `{"id":"job_id","state":"queued","completed":0,"total":200,"phase":"queued","message":"대기 중입니다.","filename":"..."}`.
+
+### GET /api/bundles/{id}/exports/{job_id}
+
+동일한 작업 상태를 반환한다. `state`: queued/running/ready/cancelled/failed. `completed/total`은 처리 문서 수이며 `phase=finalizing` 동안 파일을 마무리한다. 문서 처리가 100%여도 ready가 되기 전에는 다운로드할 수 없다. 상태·취소 정보는 서버 워커가 공유한다.
+
+### DELETE /api/bundles/{id}/exports/{job_id}
+
+취소를 요청하고 cancelled 상태를 반환한다. 생성 중 파일과 완료 파일을 삭제한다. XLSX 파일 마무리 단계의 실제 작업 중단은 저장이 반환된 뒤 확인될 수 있으며, 취소된 결과는 다운로드되지 않는다.
+
+### GET /api/bundles/{id}/exports/{job_id}/download
+
+ready 작업의 파일을 attachment로 반환한다. 미완료·취소·실패는 409, 만료된 파일은 410. 생성물은 24시간 뒤 후속 내보내기 요청의 정리 대상이 된다. 동시에 실행하는 작업은 데이터 경로 전체에서 2개, 대기·실행 작업 합계는 20개이다. 기존 동기 ZIP/Excel API도 유지한다.
+
+### Golden 변경 충돌
+
+문서 상세의 `golden_revision`은 읽어 온 Golden 원문 바이트의 SHA-256이며 없으면 `missing`이다. POST 생성·PUT 저장 본문에 `expected_revision`을, DELETE 쿼리에 같은 값을 전달한다. 현재 버전과 다르면 409이며 파일을 덮어쓰거나 삭제하지 않는다. 문서별 잠금으로 여러 워커에서 확인과 쓰기를 함께 처리한다. 기존 API 호출의 호환성을 위해 생략은 허용하지만 새 편집 화면은 항상 전달한다.
+
+### GET /api/bundles/{id}/docs/{doc_id}/golden/history?limit=100&before={cursor}
+
+응답: `{"items":[{"id":"history_id","created_at":"UTC ISO","action":"baseline|create|save|delete|restore","revision":"SHA-256|missing","has_golden":true}],"next_cursor":null,"golden_revision":"..."}`. 최신순이며 `next_cursor`로 이전 기록을 받는다. limit는 1~500으로 제한한다. 첫 변경 전에 기존 Golden 또는 없음 상태를 baseline으로 남긴다.
+
+### GET /api/bundles/{id}/docs/{doc_id}/golden/history/{history_id}
+
+해당 기록의 메타데이터와 `golden` 객체 또는 null을 반환한다. UTF-8 BOM·CP949 원문도 같은 문서 파서로 읽는다. 기록이 없으면 404.
+
+### POST /api/bundles/{id}/docs/{doc_id}/golden/history/{history_id}/restore
+
+본문: `{"expected_revision":"..."}`(필수). 해당 기록의 Golden 또는 삭제 상태로 복원하고 새 restore 기록을 남긴다. 응답은 갱신된 문서 상세. 현재 내용이 달라졌으면 409, 기록이나 문서가 없으면 404, 잘못된 기록은 422. Golden만 있던 문서를 삭제한 뒤에도 이력에서 복원할 수 있다. 번들 자체 삭제 시 이력도 함께 삭제된다.

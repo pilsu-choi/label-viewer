@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import bundle as B
 from . import export as E
+from . import export_jobs as EJ
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 NO_CACHE = {"Cache-Control": "no-cache"}  # 배포 뒤 예전 JS 모듈을 쓰지 않도록 매번 재검증
@@ -40,7 +41,7 @@ class TextGZip(GZipMiddleware):
     """이미지·내보내기(ZIP·XLSX)는 이미 압축돼 있어 건너뛴다."""
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
-        if path.endswith("/image") or "/export/" in path:
+        if path.endswith("/image") or "/export/" in path or path.endswith("/download"):
             return await self.app(scope, receive, send)
         await super().__call__(scope, receive, send)
 
@@ -139,17 +140,32 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     @app.post("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def post_golden(bundle_id: str, doc_id: str, request: Request):
         body = await json_body(request)
-        return await run_in_threadpool(call, B.create_golden, data_dir, bundle_id, doc_id, body.get("from", "empty"), body.get("doc_type"))
+        return await run_in_threadpool(call, B.create_golden, data_dir, bundle_id, doc_id, body.get("from", "empty"), body.get("doc_type"), body.get("expected_revision"))
 
     @app.put("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def put_golden(bundle_id: str, doc_id: str, request: Request):
         body = await json_body(request)
-        return await run_in_threadpool(call, B.save_golden, data_dir, bundle_id, doc_id, body.get("golden"))
+        return await run_in_threadpool(call, B.save_golden, data_dir, bundle_id, doc_id, body.get("golden"), body.get("expected_revision"))
 
     @app.delete("/api/bundles/{bundle_id}/docs/{doc_id}/golden", status_code=204)
-    def delete_golden(bundle_id: str, doc_id: str):
-        call(B.delete_golden, data_dir, bundle_id, doc_id)
+    def delete_golden(bundle_id: str, doc_id: str, expected_revision: Optional[str] = None):
+        call(B.delete_golden, data_dir, bundle_id, doc_id, expected_revision)
         return Response(status_code=204)
+
+    @app.get("/api/bundles/{bundle_id}/docs/{doc_id}/golden/history")
+    def golden_history(bundle_id: str, doc_id: str, limit: int = 100, before: Optional[str] = None):
+        return call(B.list_golden_history, data_dir, bundle_id, doc_id, limit, before)
+
+    @app.get("/api/bundles/{bundle_id}/docs/{doc_id}/golden/history/{history_id}")
+    def golden_history_version(bundle_id: str, doc_id: str, history_id: str):
+        return call(B.get_golden_history, data_dir, bundle_id, doc_id, history_id)
+
+    @app.post("/api/bundles/{bundle_id}/docs/{doc_id}/golden/history/{history_id}/restore")
+    async def restore_golden(bundle_id: str, doc_id: str, history_id: str, request: Request):
+        body = await json_body(request)
+        if not isinstance(body.get("expected_revision"), str):
+            raise HTTPException(422, "expected_revision required")
+        return await run_in_threadpool(call, B.restore_golden, data_dir, bundle_id, doc_id, history_id, body["expected_revision"])
 
     @app.put("/api/bundles/{bundle_id}/docs/{doc_id}/review", status_code=204)
     async def put_review(bundle_id: str, doc_id: str, request: Request):
@@ -188,6 +204,25 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
         return Response(content=data,
                          media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_export_name(bundle_id, doc, scope, '-golden.xlsx')}"})
+
+    @app.post("/api/bundles/{bundle_id}/exports", status_code=202)
+    async def start_export(bundle_id: str, request: Request):
+        body = await json_body(request)
+        return await run_in_threadpool(call, EJ.start, data_dir, bundle_id, body.get("format"), body.get("scope", "enabled"), body.get("ids"))
+
+    @app.get("/api/bundles/{bundle_id}/exports/{job_id}")
+    def export_status(bundle_id: str, job_id: str):
+        return call(EJ.status, data_dir, bundle_id, job_id)
+
+    @app.delete("/api/bundles/{bundle_id}/exports/{job_id}")
+    def cancel_export(bundle_id: str, job_id: str):
+        return call(EJ.cancel, data_dir, bundle_id, job_id)
+
+    @app.get("/api/bundles/{bundle_id}/exports/{job_id}/download")
+    def download_export(bundle_id: str, job_id: str):
+        path, filename = call(EJ.result, data_dir, bundle_id, job_id)
+        media = "application/zip" if path.suffix == ".zip" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        return FileResponse(path, media_type=media, filename=filename, headers={"Cache-Control": "no-store"})
 
     if FRONTEND_DIR.is_dir():
         ver = _static_version()

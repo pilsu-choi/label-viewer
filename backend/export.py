@@ -5,7 +5,7 @@ import io
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import Cell, ILLEGAL_CHARACTERS_RE
@@ -25,35 +25,99 @@ _STATUS_FILL = {
 _STORED_EXTS = {".png", ".jpg", ".jpeg", ".webp"}  # 이미 압축된 이미지는 다시 deflate 하지 않는다
 
 
-def export_bundle_zip(data_dir: Path, bundle_id: str, doc_id: str | None = None,
-                      scope: str = "enabled") -> BinaryIO:
-    """원본·전처리 이미지와 AO·Harness·Golden JSON을 업로드 폴더 구조 그대로 묶는다.
-    doc_id가 있으면 그 문서만, 없으면 scope(활성·비활성) 문서만. 수천 건이면 수 GB라 메모리 대신 임시 파일에 쓴다."""
+class ExportCancelled(Exception):
+    """Raised when a background export has received a cancellation request."""
+
+
+def _checkpoint(cancel_check: Callable[[], bool] | None) -> None:
+    if cancel_check and cancel_check():
+        raise ExportCancelled("export cancelled")
+
+
+def _progress(progress: Callable[[int, int, str], None] | None,
+              completed: int, total: int, phase: str) -> None:
+    if progress:
+        progress(completed, total, phase)
+
+
+def _resolve_doc_ids(data_dir: Path, bundle_id: str, doc_id: str | None, scope: str,
+                     ids: list[str] | None) -> tuple[Path, list[str]]:
     bdir = B.bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
         raise B.ApiError(404, "bundle not found")
+    if doc_id is not None and ids is not None:
+        raise B.ApiError(422, "doc_id and ids cannot be combined")
+    all_ids = B.doc_ids(bdir)
     if doc_id is not None:
         B._safe_id(doc_id, "doc_id")
-        B._require_doc(bdir, doc_id)
-    wanted = {doc_id} if doc_id is not None else set(B.scope_doc_ids(data_dir, bundle_id, scope))
+        if doc_id not in all_ids:
+            raise B.ApiError(404, "document not found")
+        return bdir, [doc_id]
+    if ids is not None:
+        if not isinstance(ids, list) or not ids:
+            raise B.ApiError(422, "ids must be a non-empty list")
+        if not all(isinstance(item, str) for item in ids):
+            raise B.ApiError(422, "ids must contain strings")
+        for item in ids:
+            B._safe_id(item, "doc_id")
+        unknown = set(ids) - set(all_ids)
+        if unknown:
+            raise B.ApiError(404, f"document not found: {sorted(unknown)[:5]}")
+        selected = set(ids)
+        return bdir, [item for item in all_ids if item in selected]
+    return bdir, B.scope_doc_ids(data_dir, bundle_id, scope)
+
+
+def export_bundle_zip(data_dir: Path, bundle_id: str, doc_id: str | None = None,
+                      scope: str = "enabled", *, ids: list[str] | None = None,
+                      progress: Callable[[int, int, str], None] | None = None,
+                      cancel_check: Callable[[], bool] | None = None,
+                      out: BinaryIO | None = None) -> BinaryIO | None:
+    """원본·전처리 이미지와 AO·Harness·Golden JSON을 업로드 폴더 구조 그대로 묶는다.
+    doc_id가 있으면 그 문서만, 없으면 scope(활성·비활성) 문서만. 수천 건이면 수 GB라 메모리 대신 임시 파일에 쓴다."""
+    bdir, selected_ids = _resolve_doc_ids(data_dir, bundle_id, doc_id, scope, ids)
+    wanted = set(selected_ids)
+    files_by_doc: dict[str, list[tuple[str, Path]]] = {did: [] for did in selected_ids}
+    for kind in (*B.DOC_KINDS, "ao_ui"):
+        d = bdir / kind
+        if not d.is_dir():
+            continue
+        for p in sorted(d.iterdir()):
+            if p.is_file() and not p.name.startswith(".") and p.stem in wanted:
+                files_by_doc[p.stem].append((kind, p))
     tmp_dir = B.cache_root(data_dir) / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    out = tempfile.TemporaryFile(dir=tmp_dir)
+    owned = out is None
+    if out is None:
+        out = tempfile.TemporaryFile(dir=tmp_dir)
     try:
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-            for kind in (*B.DOC_KINDS, "ao_ui"):
-                d = bdir / kind
-                if not d.is_dir():
-                    continue
-                for p in sorted(d.iterdir()):
-                    if p.is_file() and not p.name.startswith(".") and p.stem in wanted:
-                        ctype = zipfile.ZIP_STORED if p.suffix.lower() in _STORED_EXTS else zipfile.ZIP_DEFLATED
-                        zf.write(p, arcname=f"{kind}/{p.name}", compress_type=ctype)
+            total = len(selected_ids)
+            _progress(progress, 0, total, "preparing")
+            for completed, did in enumerate(selected_ids, 1):
+                _checkpoint(cancel_check)
+                for kind, p in files_by_doc[did]:
+                    _checkpoint(cancel_check)
+                    ctype = zipfile.ZIP_STORED if p.suffix.lower() in _STORED_EXTS else zipfile.ZIP_DEFLATED
+                    info = zipfile.ZipInfo(f"{kind}/{p.name}")
+                    info.compress_type = ctype
+                    with p.open("rb") as src, zf.open(info, "w", force_zip64=True) as dst:
+                        while True:
+                            _checkpoint(cancel_check)
+                            block = src.read(1 << 20)
+                            if not block:
+                                break
+                            dst.write(block)
+                _progress(progress, completed, total, "writing")
+            _progress(progress, total, total, "finalizing")
+            _checkpoint(cancel_check)
+        _checkpoint(cancel_check)
     except BaseException:
-        out.close()
+        if owned:
+            out.close()
         raise
     out.seek(0)
-    return out
+    return out if owned else None
 
 
 _OX = {True: "O", False: "X", None: ""}
@@ -77,8 +141,12 @@ def _append_row(ws, values) -> None:
     ws.append(cells)
 
 
-def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None, scope: str = "enabled") -> bytes:
-    doc_ids = B.scope_doc_ids(data_dir, bundle_id, scope) if doc_id is None else [doc_id]
+def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None, scope: str = "enabled", *,
+                       ids: list[str] | None = None,
+                       progress: Callable[[int, int, str], None] | None = None,
+                       cancel_check: Callable[[], bool] | None = None,
+                       out: BinaryIO | None = None) -> bytes | None:
+    _, selected_ids = _resolve_doc_ids(data_dir, bundle_id, doc_id, scope, ids)
 
     wb = Workbook()
     ws_summary = wb.active
@@ -106,7 +174,10 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
 
     compare_row = 1
     table_row = 0
-    for did in doc_ids:
+    total = len(selected_ids)
+    _progress(progress, 0, total, "preparing")
+    for completed, did in enumerate(selected_ids, 1):
+        _checkpoint(cancel_check)
         detail = B.doc_detail(data_dir, bundle_id, did)
         ao_sc, h_sc = detail["score"]["ao"], detail["score"]["harness"]
         cls = detail["classification"]
@@ -150,6 +221,7 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
                 fill = _STATUS_FILL.get(status)
                 if fill:
                     ws_compare.cell(row=compare_row, column=col_idx).fill = fill
+        _progress(progress, completed, total, "writing")
 
     def _acc(n_match: int, total: dict) -> float | str:
         t = sum(total.values())
@@ -163,6 +235,13 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
     for c in ws_summary[ws_summary.max_row]:
         c.font = Font(bold=True)
 
+    _progress(progress, total, total, "finalizing")
+    _checkpoint(cancel_check)
+    if out is not None:
+        wb.save(out)
+        _checkpoint(cancel_check)
+        return None
     buf = io.BytesIO()
     wb.save(buf)
+    _checkpoint(cancel_check)
     return buf.getvalue()

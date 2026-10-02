@@ -28,11 +28,11 @@ async def main():
           const { api } = await import('/frontend/js/api.js');
           const { createGoldenEditor } = await import('/frontend/js/goldenEditor.js');
           const pending = [];
-          api.putGolden = (_bundleId, _docId, golden) => new Promise((resolve, reject) => pending.push({golden, resolve, reject}));
+          api.putGolden = (_bundleId, _docId, golden, expectedRevision) => new Promise((resolve, reject) => pending.push({golden, expectedRevision, resolve, reject}));
           const fixture = () => ({
-            doc_types: [], has: {}, compare: [], golden: { documents: [{ doc_type: '', extracted_fields: [{key:'f', value:'initial', dtype:'string'}], extracted_groups: [], extracted_tables: [] }] }
+            doc_types: [], has: {}, compare: [], golden_revision: 'rev-initial', golden: { documents: [{ doc_type: '', extracted_fields: [{key:'f', value:'initial', dtype:'string'}], extracted_groups: [], extracted_tables: [] }] }
           });
-          const response = (golden) => ({ ...fixture(), golden });
+          const response = (golden) => ({ ...fixture(), golden_revision: `rev-${golden.documents[0].extracted_fields[0].value}`, golden });
           const host = document.createElement('div'); document.body.appendChild(host);
           let editor;
           const callbackDirty = [];
@@ -42,12 +42,14 @@ async def main():
           const firstSave = editor.save();
           await Promise.resolve(); await Promise.resolve();
           if (pending.length !== 1) throw new Error('first request did not start');
+          if (pending[0].expectedRevision !== 'rev-initial') throw new Error('first save omitted expected revision');
           editor.adoptValue(entry, 'B');
           pending[0].resolve(response(pending[0].golden));
           await firstSave;
           if (!editor.isDirty()) throw new Error('edit made during request was incorrectly marked clean');
           await new Promise(r => setTimeout(r, 1600));
           if (pending.length !== 2) throw new Error('latest edit was not autosaved');
+          if (pending[1].expectedRevision !== 'rev-A') throw new Error('queued autosave did not use the latest response revision');
           if (pending[1].golden.documents[0].extracted_fields[0].value !== 'B') throw new Error('autosave did not contain latest value');
           pending[1].resolve(response(pending[1].golden));
           await new Promise(r => setTimeout(r, 0));
@@ -57,7 +59,7 @@ async def main():
 
           const host2 = document.createElement('div'); document.body.appendChild(host2);
           const calls = []; const started = [];
-          api.putGolden = (_b, _d, golden) => new Promise(resolve => calls.push({golden, resolve}));
+          api.putGolden = (_b, _d, golden, expectedRevision) => new Promise(resolve => calls.push({golden, expectedRevision, resolve}));
           const editor2 = createGoldenEditor(host2, { bundleId:'b', docId:'d', doc:fixture(), onSaveStart:()=>started.push('start'), onSaveOk:()=>started.push('ok'), onDirtyChange:()=>started.push('dirty') });
           editor2.adoptValue(entry, 'queued-1');
           const queuedFirst = editor2.save();
@@ -70,6 +72,7 @@ async def main():
           await queuedFirst;
           await Promise.resolve(); await Promise.resolve();
           if (calls.length !== 2) throw new Error('explicitly queued network save was dropped during destroy');
+          if (calls[1].expectedRevision !== 'rev-queued-1') throw new Error('queued manual save used an obsolete revision');
           calls[1].resolve(response(calls[1].golden));
           await queuedSecond;
           await new Promise(r => setTimeout(r, 1600));
@@ -79,7 +82,7 @@ async def main():
 
           const hostError = document.createElement('div'); document.body.appendChild(hostError);
           const failedQueue = []; let saveErrors = 0;
-          api.putGolden = (_b, _d, golden) => new Promise((resolve, reject) => failedQueue.push({golden, resolve, reject}));
+          api.putGolden = (_b, _d, golden, expectedRevision) => new Promise((resolve, reject) => failedQueue.push({golden, expectedRevision, resolve, reject}));
           const editorError = createGoldenEditor(hostError, { bundleId:'b', docId:'d', doc:fixture(), onSaveErr:()=>saveErrors++ });
           editorError.adoptValue(entry, 'first');
           const failedSave = editorError.save();
@@ -99,19 +102,19 @@ async def main():
           const host3 = document.createElement('div'); document.body.appendChild(host3);
           const deletePending = []; const events = [];
           window.confirm = () => true;
-          api.putGolden = (_b, _d, golden) => new Promise(resolve => deletePending.push({golden, resolve}));
-          api.deleteGolden = async () => { events.push('delete'); };
+          api.putGolden = (_b, _d, golden, expectedRevision) => new Promise(resolve => deletePending.push({golden, expectedRevision, resolve}));
+          api.deleteGolden = async (_b, _d, expectedRevision) => { events.push(`delete:${expectedRevision}`); };
           const editor3 = createGoldenEditor(host3, { bundleId:'b', docId:'d', doc:fixture() });
           editor3.adoptValue(entry, 'before-delete');
           const saveBeforeDelete = editor3.save();
           await Promise.resolve(); await Promise.resolve();
-          host3.querySelector('button.danger').click();
+          Array.from(host3.querySelectorAll('button')).find(button => button.textContent.includes('Golden 삭제')).click();
           await Promise.resolve();
           if (events.length) throw new Error('delete was not serialized behind pending PUT');
           deletePending[0].resolve(response(deletePending[0].golden));
           await saveBeforeDelete;
           await new Promise(r => setTimeout(r, 0));
-          if (events.join(',') !== 'delete') throw new Error('delete did not follow the pending PUT');
+          if (events.join(',') !== 'delete:rev-before-delete') throw new Error('delete did not follow the pending PUT with its new revision');
           await new Promise(r => setTimeout(r, 1600));
           if (deletePending.length !== 1) throw new Error('autosave ran after deletion');
           editor3.destroy(); host3.remove();

@@ -1,3 +1,4 @@
+import { startExport } from './exportTask.js';
 import { el, clear, mount, debounce, toast, isEditingTarget, isMismatch, icon, menuButton, mismatchBadge, classBadges } from './util.js';
 import { api } from './api.js';
 import { navigate, setNavGuard } from './router.js';
@@ -43,6 +44,11 @@ export function renderDetail(root, bundleId, docId) {
     if (destroyed) return;
     mount(root, el('div', { class: 'error-block' }, `문서를 불러오지 못했습니다: ${e.message}`));
   });
+
+  function warnUnsaved(event) {
+    if (!editor?.isDirty()) return;
+    event.preventDefault(); event.returnValue = "";
+  }
 
   function setSaveState(cls, label) {
     saveStateEl.className = `save-state ${cls}`;
@@ -217,12 +223,16 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function exportMenu() {
-    const guardUnsaved = (e) => {
-      if (editor && editor.isDirty()) { e.preventDefault(); toast('저장하지 않은 Golden 변경이 있습니다. 저장 후 내보내세요.', 'error'); }
-    };
+    const item = (format, label, description) => el('button', { type: 'button', onclick: (event) => {
+      event.stopPropagation();
+      if (editor?.hasConflict?.()) { toast('Golden 저장 충돌을 해결한 후 내보내세요.', 'error'); return; }
+      if (editor && editor.isDirty()) { toast('저장하지 않은 Golden 변경이 있습니다. 저장 후 내보내세요.', 'error'); return; }
+      closeExportMenus?.();
+      startExport(bundleId, { format, ids: [docId] }, `${label} · 이 문서`);
+    } }, [el('b', {}, label), el('span', {}, description)]);
     return menuButton('내보내기', [
-      el('a', { href: api.exportBundleZipUrl(bundleId, docId), onclick: guardUnsaved }, [el('b', {}, '전체 묶음 ZIP'), el('span', {}, '이 문서의 원본·전처리 이미지, AO·Harness·Golden JSON')]),
-      el('a', { href: api.exportGoldenXlsxUrl(bundleId, docId), onclick: guardUnsaved }, [el('b', {}, 'Excel'), el('span', {}, '이 문서의 비교·채점 결과')]),
+      item('zip', '전체 묶음 ZIP', '이 문서의 원본·전처리 이미지, AO·Harness·Golden JSON'),
+      item('xlsx', 'Excel', '이 문서의 비교·채점 결과'),
     ]);
   }
 
@@ -230,7 +240,8 @@ export function renderDetail(root, bundleId, docId) {
     closeExportMenus = () => root.querySelectorAll('.export-pop').forEach((p) => { p.style.display = 'none'; });
     document.addEventListener('click', closeExportMenus);
     document.addEventListener('keydown', onKeydown);
-    setNavGuard(() => (editor && editor.isDirty() && !editor.isAutosaveOn()) ? '저장하지 않은 변경사항이 있습니다.' : true);
+    window.addEventListener('beforeunload', warnUnsaved);
+    setNavGuard(() => (editor && editor.isDirty()) ? '저장하지 않은 변경사항이 있습니다.' : true);
 
     saveStateEl = el('span', { class: 'save-state saved' }, '저장됨');
     reviewInput = el('input', { type: 'checkbox', checked: doc.review === 'done',
@@ -330,6 +341,7 @@ export function renderDetail(root, bundleId, docId) {
       },
       onSaveErr: () => setSaveState('dirty', '변경사항 있음'),
       onGoldenCreated: (updated) => { refreshAfterDocUpdate(updated); },
+      onGoldenRemoteChange: (updated) => { setSaveState('saved', '저장됨'); refreshAfterDocUpdate(updated); },
       onHoverBbox,
     });
 
@@ -466,6 +478,7 @@ export function renderDetail(root, bundleId, docId) {
   return () => {
     destroyed = true;
     document.removeEventListener('keydown', onKeydown);
+    window.removeEventListener('beforeunload', warnUnsaved);
     drawReconLater.cancel();
     if (closeExportMenus) document.removeEventListener('click', closeExportMenus);
     if (dragCleanup) dragCleanup();

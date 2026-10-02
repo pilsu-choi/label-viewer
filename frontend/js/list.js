@@ -1,3 +1,4 @@
+import { startExport } from './exportTask.js';
 import { el, mount, debounce, clear, fmtPct, scoreCard, icon, menuButton, mismatchBadge, classBadges, getDocTypeFilter, matchDocType, docTypeSelect, toast } from './util.js';
 import { api } from './api.js';
 import { navigate } from './router.js';
@@ -140,18 +141,26 @@ export function renderList(root, bundleId) {
 
   function exportMenu() {
     const by = state.bundle.summary_by_scope;
-    const item = (href, n, title, desc) => (n
-      ? el('a', { href }, [el('b', {}, title), el('span', {}, desc)])
+    const item = (options, n, title, desc) => (n
+      ? el('button', { type: 'button', onclick: (event) => {
+          event.stopPropagation(); closeExportMenus();
+          const latest = options.ids ? { ...options, ids: [...state.selected] } : options;
+          startExport(bundleId, latest, `${title} · ${latest.ids?.length ?? n}건`);
+        } }, [el('b', {}, title), el('span', {}, desc)])
       : el('div', { class: 'export-item disabled', title: '해당 문서가 없습니다' }, [el('b', {}, title), el('span', {}, '문서 없음')]));
     const group = (scope, label) => {
       const n = by[scope].docs;
       return [
         el('div', { class: 'export-group' }, `${label} 목록 · ${n}건`),
-        item(api.exportGoldenXlsxUrl(bundleId, null, scope), n, 'Excel', '요약·필드·표·비교 시트'),
-        item(api.exportBundleZipUrl(bundleId, null, scope), n, '전체 묶음 ZIP', '원본·전처리 이미지, AO·Harness·Golden JSON'),
+        item({ format: 'xlsx', scope }, n, 'Excel', '요약·필드·표·비교 시트'),
+        item({ format: 'zip', scope }, n, '전체 묶음 ZIP', '원본·전처리 이미지, AO·Harness·Golden JSON'),
       ];
     };
-    return menuButton('내보내기', [...group('enabled', '활성'), ...group('disabled', '비활성')]);
+    const ids = [...state.selected];
+    const selection = [el('div', { class: 'export-group' }, `선택 문서 · ${ids.length}건`),
+      item({ format: 'xlsx', ids }, ids.length, '선택 문서 Excel', '페이지·필터를 넘어 선택한 문서만'),
+      item({ format: 'zip', ids }, ids.length, '선택 문서 ZIP', '선택한 문서의 전체 묶음')];
+    return menuButton('내보내기', [...selection, ...group('enabled', '활성'), ...group('disabled', '비활성')]);
   }
 
   function applyEnabled(enabled) {
@@ -169,6 +178,7 @@ export function renderList(root, bundleId) {
     if (state.loading) { mount(screen, el('div', { class: 'loading-block' }, '불러오는 중…')); return; }
     if (state.error) { mount(screen, el('div', { class: 'error-block' }, `번들을 불러오지 못했습니다: ${state.error}`)); return; }
     const b = state.bundle;
+    const exportHost = el("div", {}, exportMenu());
     const topbar = el('div', { class: 'topbar' }, [
       el('a', { class: 'brand', href: '#/' }, 'Label Viewer'),
       el('div', { class: 'sep' }),
@@ -180,7 +190,7 @@ export function renderList(root, bundleId) {
         el('input', { type: 'search', placeholder: '문서 ID나 유형으로 찾기', value: state.q,
           oninput: debounce((e) => { state.q = e.target.value; state.page = 1; drawGrid(); }, 150) }),
       ]),
-      exportMenu(),
+      exportHost,
     ]);
 
     const summary = scopeSummary();
@@ -207,6 +217,7 @@ export function renderList(root, bundleId) {
     drawGrid();
 
     function drawGrid() {
+      mount(exportHost, exportMenu());
       const docs = filteredDocs();
       const last = Math.max(1, Math.ceil(docs.length / state.pageSize));
       state.page = Math.min(Math.max(1, state.page), last);
