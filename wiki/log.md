@@ -160,3 +160,9 @@ status: active
 
 ### Update
 - [문서 활성·비활성, 범위별 집계·내보내기, 목록 페이지네이션](2026-10-01-doc-enable-pagination.md): 상세 화면 문서 레일에서 문서 이동 시 스크롤이 맨 위로 돌아가던 문제 수정 기록 추가(2026-10-01, `fix/doc-rail-scroll`).
+
+### Creation
+- [명칭 행 원장 명칭 표시·팝오버 화면 맞춤](2026-10-02-name-row-master-ref.md): EDI명칭·병명 행에 같은 행 코드 셀의 원장 명칭을 보여 주고 팝오버가 화면에 맞게 함(2026-10-02, `feat/name-row-master-ref`).
+
+### Update
+- [원장 명칭(master_reference) 상시 표시](2026-10-02-master-reference-view.md): 명칭 셀은 evidence가 없어 보조줄이 안 나오던 한계를 `feat/name-row-master-ref`에서 보완(더미 샘플 master_reference 위치 변경 포함).

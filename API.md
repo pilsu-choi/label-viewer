@@ -57,7 +57,7 @@ storage/bundles/{bundle_id}/
 
 - 셀(cell) = `{"key", "value", "dtype"}` 이 필수이고 AO 가 주는 나머지 키(confidence, masked_value …)는 있으면 보존한다.
 - 문서가 여러 개(`documents[i]`)일 수 있다. 비교·편집은 `documents` 전체를 대상으로 하고 경로에 `documents[i]` 를 붙인다(아래).
-- **Harness 값**: 하네스 JSON 셀의 `harness.final_value` 가 있으면 그것, 없으면 `value`. (`value` 는 AO 원래 값이다.) 하네스 셀의 `harness` 블록이 근거(evidence)다. 블록에 `master_reference:{system_id,code,name}`·`candidates` 가 있으면 비교 탭 Harness 값 셀 아래에 `원장(<code>) <name>` 보조줄로 상시 표시하고(표시 전용, 채택·채점 무관) 근거 팝오버 '마스터 대조'에도 싣는다.
+- **Harness 값**: 하네스 JSON 셀의 `harness.final_value` 가 있으면 그것, 없으면 `value`. (`value` 는 AO 원래 값이다.) 하네스 셀의 `harness` 블록이 근거(evidence)다. 블록에 `master_reference:{system_id,code,name}`·`candidates` 가 있으면 비교 탭 Harness 값 셀 아래에 `원장(<code>) <name>` 보조줄로 상시 표시하고(표시 전용, 채택·채점 무관) 근거 팝오버 '마스터 대조'에도 싣는다. 명칭 셀(`EDI명칭`·`병명`)에는 하네스가 evidence 를 달지 않으므로, 백엔드가 같은 행(표) 또는 같은 문서(필드)의 코드 셀(`EDI코드`·`병명코드`) `master_reference` 를 비교 행의 `code_master_reference` 로 복사하고(`backend/compare.py` `CODE_NAME_PAIRS`), 화면은 명칭 셀 자신의 값이 없을 때 이를 같은 형식으로 보여 준다(표시 전용).
 - 초안 생성:
   - `ao` → 기존 AO JSON은 복사하고, UI response는 변환한 구조를 복사.
   - `harness` → 하네스 JSON 복사 후 각 셀 `value` 를 하네스 값으로 바꾸고, 셀·표·문서의 `harness` 키와 최상위 `harness`·`meta` 를 뺀다.

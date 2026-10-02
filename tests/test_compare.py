@@ -27,3 +27,19 @@ def test_master_reference_passthrough_in_evidence():
         (row,) = compare_doc(0, doc(cell()), doc(cell()), doc(cell(**extra)))
         assert row["evidence"].get("master_reference") == extra.get("master_reference")
         assert row["evidence"].get("candidates") == extra.get("candidates")
+
+
+def test_name_row_gets_code_master_reference():
+    from backend.compare import compare_bundle
+    ref = {"system_id": "EDI", "code": "D1", "name": "원장명"}
+    cell = lambda k, **h: {"key": k, "value": "x", "dtype": "string", **({"harness": h} if h else {})}
+    def doc(code_h):
+        rows = [[cell("EDI코드", **code_h), cell("EDI명칭")], [cell("EDI코드"), cell("EDI명칭")]]
+        return {"extracted_fields": [cell("병명코드", **code_h), cell("병명")], "extracted_groups": [],
+                "extracted_tables": [{"key": "세부", "headers": ["EDI코드", "EDI명칭"], "rows": rows}]}
+    out = {(r["area"], r["row"], r["key"]): r for r in compare_bundle(None, {"documents": [doc({})]}, {"documents": [doc({"master_reference": ref})]})}
+    assert out[("table", 0, "EDI명칭")]["code_master_reference"] == ref
+    assert out[("field", "", "병명")]["code_master_reference"] == ref
+    for k in (("table", 1, "EDI명칭"), ("table", 0, "EDI코드"), ("field", "", "병명코드")):
+        assert "code_master_reference" not in out[k]
+    assert "code_master_reference" not in {r["key"]: r for r in compare_bundle(None, {"documents": [doc({})]}, {"documents": [doc({})]})}["병명"]

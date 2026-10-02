@@ -176,8 +176,7 @@ def build(out: Path) -> None:
                                      correction_basis="rule", rule_result="fail",
                                      rule_detail="금액 형식 오류 → 규칙 재계산")]
     mc001_h_table = [{"key": "항목내역", "field_code": None, "headers": ["항목", "금액"], "rows": [
-        [harness_field("항목", "진찰료", "진찰료", master_reference={"system_id": "EDI:의치과_급여", "code": "AA154", "name": "초진 진찰료"},
-                       candidates=["AA154", "AA254"]),
+        [field("항목", "진찰료", "string"),
          harness_field("금액", "33000", "35000", "int", tier="repaired",
                                                         correction_basis="rule", rule_result="fail",
                                                         rule_detail="합계 불일치 → 원문 재검산")],
@@ -208,7 +207,8 @@ def build(out: Path) -> None:
 
     dx002_h_fields = [
         harness_field("병명코드", "K128", "K123", "string", tier="repaired", correction_basis="master",
-                       rule_result="fail", rule_detail="상병코드 마스터 대조 불일치 → 교정"),
+                       rule_result="fail", rule_detail="상병코드 마스터 대조 불일치 → 교정",
+                       master_reference={"system_id": "KCD", "code": "K123", "name": "고혈압"}),
         harness_field("작성일자", "20260910", "20260911", "string", tier="repaired", correction_basis="reread",
                        rule_result="warn", rule_detail="재판독 값과 상이(더미: 의도적 악화 사례)"),
     ]

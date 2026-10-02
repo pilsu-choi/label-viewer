@@ -26,3 +26,7 @@ status: active
 ## 한계
 
 프론트 자동 테스트 체계가 없어 화면 표시는 코드 검토 수준이며 브라우저 확인은 하지 않았다. 후보가 객체인 경우 `code`→`name` 순으로 표시한다.
+
+## Update (2026-10-02, `feat/name-row-master-ref`)
+
+명칭 셀(`EDI명칭`·`병명`)에는 하네스 evidence가 없어 위 보조줄이 나오지 않았다. 같은 행 코드 셀의 master_reference를 `code_master_reference`로 복사해 표시하도록 보완했다. 더미 샘플의 master_reference는 항목 셀에서 DX002 `병명코드` 셀로 옮겼다. 자세한 내용은 [명칭 행 원장 명칭 표시](2026-10-02-name-row-master-ref.md).
