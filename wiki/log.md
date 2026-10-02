@@ -169,3 +169,6 @@ status: active
 
 ### Creation
 - [이미지 기본 보기를 전처리로](2026-10-02-default-preprocessed-view.md): 상세 뷰어·목록 썸네일이 전처리 이미지를 먼저 보여 주고 없으면 원본을 쓰게 함(2026-10-02, `feat/default-preprocessed-view`).
+
+### Creation
+- [같은 문서 유형이 표기에 따라 나뉘던 문제 수정](2026-10-02-doc-type-canon.md): AO 코드·별칭·표준 이름을 표준 이름으로 묶어 목록·필터·내보내기·영수증 비교 판단을 통일(2026-10-02, `fix/doc-type-canon`).

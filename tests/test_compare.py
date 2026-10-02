@@ -19,6 +19,15 @@ def test_total_alias_receipt_only():
     assert cell_status("string", "계", "합계", "항목") == "MISMATCH"
 
 
+def test_total_alias_receipt_by_ao_code():
+    # 기준 문서 종류가 AO 코드여도 영수증으로 보고 계·합계를 같은 행으로 본다
+    cell = lambda v: {"key": "항목", "value": v, "dtype": "string"}
+    for dt in ("진료비영수증", "AC02922011", " AC02922011 "):
+        doc = lambda v: {"doc_type": dt, "extracted_fields": [cell(v)], "extracted_groups": [], "extracted_tables": []}
+        (row,) = compare_doc(0, doc("계"), doc("계"), doc("합계"))
+        assert row["harness_status"] == "MATCH", dt
+
+
 def test_master_reference_passthrough_in_evidence():
     ref = {"system_id": "EDI:의치과_급여", "code": "D1890002", "name": "γ-GTP [화학반응-장비측정]"}
     cell = lambda **h: {"key": "항목", "value": "강마지티피", "dtype": "string", "harness": {"final_value": "강마지티피", **h}}

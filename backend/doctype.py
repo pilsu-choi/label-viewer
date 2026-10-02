@@ -26,10 +26,12 @@ def canon(value) -> str:
     return v if v in DOC_TYPES else ""
 
 
-def label(value) -> str:
-    """화면 표시용 문서 종류. AO 코드면 '진료비영수증 (AC02922011)'."""
+def label(value, code: bool = False) -> str:
+    """화면 표시용 문서 종류. 코드·별칭도 표준 이름으로 묶고(모르는 값은 그대로),
+    code=True 이고 AO 코드면 '진료비영수증 (AC02922011)'."""
     v = str(value or "").strip()
-    return f"{AO_CODES[v]} ({v})" if v in AO_CODES else v
+    name = canon(v) or v
+    return f"{name} ({v})" if code and v in AO_CODES else name
 
 
 def _first_type(data: dict | None) -> str:
