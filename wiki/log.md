@@ -175,3 +175,4 @@ status: active
 
 ### Creation
 - [업로드 스트리밍 저장·메모리 limit 4Gi](2026-10-02-streaming-upload.md): 큰 업로드에서 Pod가 OOMKilled로 죽어 `네트워크 오류`가 나던 문제를 스트리밍 복사로 해결하고 k8s 메모리 limit을 4Gi로 올림(2026-10-02, `fix/streaming-upload`).
+- [결과가 없는 쪽은 채점하지 않기](2026-10-02-score-without-result.md): 결과 문서가 없는 쪽(AO·Harness)의 셀 판정을 비워 Golden만 있는 번들에서 정확도·불일치가 생기지 않게 함(2026-10-02, `fix/score-without-result`).

@@ -183,7 +183,7 @@ export function statusBadge(status) {
 }
 
 // 정확도 + 상태 분포 막대 + 범례. score 가 없으면 hint 를 보여 준다.
-export function scoreCard(title, score, hint = 'Golden이 있어야 채점됩니다') {
+export function scoreCard(title, score, hint = 'Golden과 결과가 모두 있어야 채점됩니다') {
   const head = el('div', { class: 'sc-head' }, [el('span', { class: 'sc-name' }, title), el('span', { class: 'sc-acc' }, score ? fmtPct(score.accuracy) : '—')]);
   if (!score) return el('div', { class: 'score-card' }, [head, el('div', { class: 'hint' }, hint)]);
   const total = score.total || 1;
