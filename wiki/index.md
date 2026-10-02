@@ -43,3 +43,5 @@ status: active
 - [2026-09-28 Label Viewer UI 마감 품질 개선](2026-09-28-label-viewer-ui-polish.md)
 - [2026-09-28 AO–Harness Golden Set 검수 Viewer](2026-09-28-golden-set-viewer.md) (deprecated)
 - [작업 기록](log.md)
+
+- [엑셀 내보내기·잠재 오류 수정과 전체 번들 목록](2026-10-03-export-audit-bundle-list.md)

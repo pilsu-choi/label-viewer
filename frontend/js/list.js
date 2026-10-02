@@ -94,7 +94,7 @@ export function renderList(root, bundleId) {
     else if (state.filter === 'nogolden') docs = docs.filter((d) => !d.has.golden);
     else if (state.filter === 'done') docs = docs.filter((d) => d.review === 'done');
     else if (state.filter === 'pending') docs = docs.filter((d) => d.review !== 'done');
-    else if (state.filter === 'missing') docs = docs.filter((d) => !d.has.original || !d.has.preprocessed || !d.has.ao_extract || !d.has.harness || !d.has.golden);
+    else if (state.filter === 'missing') docs = docs.filter((d) => !d.has.original || !d.has.ao_extract || !d.has.harness || !d.has.golden);
     else if (state.filter === 'error') docs = docs.filter((d) => d.errors && d.errors.length);
     const type = getDocTypeFilter(bundleId);
     docs = docs.filter((d) => matchDocType(d, type));
@@ -173,6 +173,7 @@ export function renderList(root, bundleId) {
       el('a', { class: 'brand', href: '#/' }, 'Label Viewer'),
       el('div', { class: 'sep' }),
       el('div', { class: 'title' }, b.name || b.id),
+      el('a', { class: 'btn ghost sm bundle-directory-link', href: '#/bundles' }, '전체 번들'),
       el('div', { class: 'grow' }),
       el('label', { class: 'search-box' }, [
         icon('search'),

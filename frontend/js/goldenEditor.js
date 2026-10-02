@@ -84,6 +84,10 @@ export function createGoldenEditor(host, opts) {
   let doc = opts.doc; // GET docs/{doc} 응답
   let golden = null;
   let dirty = false;
+  let editRevision = 0;
+  let saveQueue = Promise.resolve();
+  let destroyed = false;
+  let deleting = false;
   let autosave = true;
   let advanced = false;
   let collapsedGroups = new Set();
@@ -94,10 +98,13 @@ export function createGoldenEditor(host, opts) {
   let mismatchCursor = -1; // focusMismatch 가 마지막으로 이동한 위치(버튼 클릭 시 포커스가 버튼으로 옮겨가므로 activeElement 로는 추적 불가)
   const listeners = { dirty: opts.onDirtyChange || (() => {}), start: opts.onSaveStart || (() => {}), ok: opts.onSaveOk || (() => {}), err: opts.onSaveErr || (() => {}) };
 
-  const debouncedSave = debounce(() => { if (autosave) doSave(); }, 1500);
+  const debouncedSave = debounce(() => { if (!destroyed && !deleting && autosave) doSave(); }, 1500);
 
   const updateSummaryLater = debounce(() => updateSummary(), 150);
-  function markDirty() { shownPaths = null; dirty = true; listeners.dirty(true); debouncedSave(); updateSummaryLater(); }
+  function markDirty() {
+    if (destroyed) return;
+    shownPaths = null; editRevision += 1; dirty = true; listeners.dirty(true); debouncedSave(); updateSummaryLater();
+  }
 
   // 필드+그룹+표 셀 전체에서 "Golden 값이 비었는데 소스(AO/Harness)에는 값이 있는" 항목 수.
   function countEmptyWithSource() {
@@ -142,13 +149,23 @@ export function createGoldenEditor(host, opts) {
   }
 
   function doSave() {
-    if (!golden) return Promise.resolve();
-    listeners.start();
-    return api.putGolden(bundleId, docId, golden).then((res) => {
-      doc = res; cmap = compareMap(doc.compare);
-      dirty = false; listeners.dirty(false); listeners.ok(res);
-      if (!host.contains(document.activeElement) || !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) render();
-    }).catch((e) => { listeners.err(e); toast(`저장 실패: ${e.message}`, 'error'); });
+    if (destroyed || deleting || !golden) return Promise.resolve();
+    const revision = editRevision;
+    const snapshot = structuredClone(golden);
+    const task = saveQueue.catch(() => {}).then(() => {
+      if (!destroyed) listeners.start();
+      return api.putGolden(bundleId, docId, snapshot).then((res) => {
+        doc = res; cmap = compareMap(doc.compare);
+        dirty = editRevision !== revision;
+        if (destroyed) return;
+        listeners.dirty(dirty);
+        listeners.ok(res);
+        if (!host.contains(document.activeElement) || !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) render();
+        if (dirty && autosave) debouncedSave();
+      });
+    }).catch((e) => { if (!destroyed) { listeners.err(e); toast(`저장 실패: ${e.message}`, 'error'); } });
+    saveQueue = task;
+    return task;
   }
 
   function ensureDoc0() {
@@ -293,12 +310,21 @@ export function createGoldenEditor(host, opts) {
   }
 
   function onDeleteGolden() {
-    if (!confirm('Golden Set을 삭제할까요?')) return;
-    api.deleteGolden(bundleId, docId).then(() => {
-      doc = { ...doc, golden: null }; golden = null; render();
+    if (deleting || !confirm('Golden Set을 삭제할까요?')) return;
+    deleting = true;
+    debouncedSave.cancel();
+    saveQueue = saveQueue.catch(() => {}).then(() => api.deleteGolden(bundleId, docId)).then(() => {
+      doc = { ...doc, golden: null }; golden = null; dirty = false; editRevision += 1;
+      if (destroyed) return;
+      listeners.dirty(false); render();
       toast('Golden Set을 삭제했습니다.');
       opts.onGoldenCreated && opts.onGoldenCreated(doc);
-    }).catch((e) => toast(e.message, 'error'));
+    }).catch((e) => {
+      if (!destroyed) toast(e.message, 'error');
+    }).finally(() => {
+      deleting = false;
+      if (!destroyed && dirty && autosave) debouncedSave();
+    });
   }
 
   function tipHandlers(path) {
@@ -665,7 +691,7 @@ export function createGoldenEditor(host, opts) {
       if (!advanced) render();
       return prev;
     },
-    destroy: () => { debouncedSave.cancel(); updateSummaryLater.cancel(); hideTip(); },
+    destroy: () => { destroyed = true; debouncedSave.cancel(); updateSummaryLater.cancel(); hideTip(); },
   };
 }
 

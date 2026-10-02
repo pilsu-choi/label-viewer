@@ -69,6 +69,8 @@ bundle/
 - 확장자와 알려진 접미사를 뗀 파일명(stem)이 같으면 같은 문서로 묶는다. 빠진 파일이 있어도 번들 전체가 실패하지 않고, 해당 문서에 Missing이나 오류로만 표시된다.
 - 업로드한 번들은 `storage/bundles/{id}/`에 저장된다. AO와 Harness JSON은 읽기만 하고, 수정하는 것은 `golden/`뿐이다.
 
+홈의 최근 번들 아래 `모든 번들 보기` 또는 각 번들 화면의 `전체 번들`을 눌러 전체 목록으로 이동한다. 전체 목록에서는 이름·ID 검색, 최신순·오래된순·이름순 정렬, 페이지 이동을 제공한다.
+
 ## 정답지 형식
 
 정답지는 **AO 추출 결과(`ao_extract`)와 같은 형식**이다(`documents[].extracted_fields / extracted_groups / extracted_tables`). 새 정답지는 AO 복사, Harness 복사(`harness.final_value`로 값을 바꾸고 `harness` 블록은 뺌), 빈 정답지 중 하나로 만든다. 자세한 형식, 비교 규칙, API는 [API.md](API.md)에 있다.

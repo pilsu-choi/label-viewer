@@ -314,6 +314,32 @@ def test_export_xlsx(client: TestClient, bundle: dict):
     assert wb["요약"].max_row >= 2
 
 
+
+def test_export_xlsx_without_growing_sheet_scans(client: TestClient, bundle: dict, monkeypatch):
+    from openpyxl.worksheet.worksheet import Worksheet
+
+    original = Worksheet.max_row.fget
+    def max_row(ws):
+        if ws.title in ("비교", "표"):
+            raise AssertionError("export must not scan growing sheets for every row")
+        return original(ws)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Worksheet, "max_row", property(max_row))
+        response = client.get(f"/api/bundles/{bundle['id']}/export/golden.xlsx")
+    assert response.status_code == 200
+    wb = load_workbook(io.BytesIO(response.content))
+    for row in wb["표"]:
+        if row[0].value:
+            assert all(cell.font.bold for cell in row if cell.value is not None)
+    from backend.export import _STATUS_FILL
+    for row in wb["비교"].iter_rows(min_row=2):
+        for index in (8, 10):
+            cell = row[index]
+            if cell.value in _STATUS_FILL:
+                assert cell.fill == _STATUS_FILL[cell.value]
+
+
 def test_enable_disable_docs(client: TestClient, bundle: dict):
     bid = bundle["id"]
     ids = [d["id"] for d in bundle["docs"]]
@@ -675,3 +701,24 @@ def test_golden_only_bundle_has_no_score_or_mismatch(client: TestClient, tmp_pat
     doc = client.get(f"/api/bundles/{resp.json()['id']}/docs/G001").json()
     assert doc["score"] == {"ao": None, "harness": None}
     assert doc["compare"] and all(r["ao_status"] == "" and r["harness_status"] == "" for r in doc["compare"])
+
+
+def test_export_xlsx_keeps_ocr_text_literal(client: TestClient, bundle: dict):
+    bid = bundle["id"]
+    did = bundle["docs"][0]["id"]
+    golden = {"documents": [{"doc_type": "", "extracted_fields": [
+        {"key": "=key\x01", "value": "=1+1\x02", "dtype": "string"}],
+        "extracted_groups": [], "extracted_tables": []}]}
+    assert client.put(f"/api/bundles/{bid}/docs/{did}/golden", json={"golden": golden}).status_code == 200
+    response = client.get(f"/api/bundles/{bid}/export/golden.xlsx", params={"doc": did})
+    assert response.status_code == 200
+    wb = load_workbook(io.BytesIO(response.content))
+    assert wb["필드"]["E2"].value == "=key"
+    assert wb["필드"]["F2"].value == "=1+1"
+    assert wb["필드"]["E2"].data_type == wb["필드"]["F2"].data_type == "s"
+
+
+@pytest.mark.parametrize("ext", ["bundle.zip", "golden.xlsx"])
+def test_export_unknown_doc_returns_404(client: TestClient, bundle: dict, ext):
+    response = client.get(f"/api/bundles/{bundle['id']}/export/{ext}", params={"doc": "unknown"})
+    assert response.status_code == 404

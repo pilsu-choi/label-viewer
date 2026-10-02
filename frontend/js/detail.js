@@ -217,11 +217,12 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function exportMenu() {
+    const guardUnsaved = (e) => {
+      if (editor && editor.isDirty()) { e.preventDefault(); toast('저장하지 않은 Golden 변경이 있습니다. 저장 후 내보내세요.', 'error'); }
+    };
     return menuButton('내보내기', [
-      el('a', { href: api.exportBundleZipUrl(bundleId, docId), onclick: (e) => {
-        if (editor && editor.isDirty()) { e.preventDefault(); toast('저장하지 않은 Golden 변경이 있습니다. 저장 후 내보내세요.', 'error'); }
-      } }, [el('b', {}, '전체 묶음 ZIP'), el('span', {}, '이 문서의 원본·전처리 이미지, AO·Harness·Golden JSON')]),
-      el('a', { href: api.exportGoldenXlsxUrl(bundleId, docId) }, [el('b', {}, 'Excel'), el('span', {}, '이 문서의 비교·채점 결과')]),
+      el('a', { href: api.exportBundleZipUrl(bundleId, docId), onclick: guardUnsaved }, [el('b', {}, '전체 묶음 ZIP'), el('span', {}, '이 문서의 원본·전처리 이미지, AO·Harness·Golden JSON')]),
+      el('a', { href: api.exportGoldenXlsxUrl(bundleId, docId), onclick: guardUnsaved }, [el('b', {}, 'Excel'), el('span', {}, '이 문서의 비교·채점 결과')]),
     ]);
   }
 
@@ -321,7 +322,12 @@ export function renderDetail(root, bundleId, docId) {
       bundleId, docId, doc,
       onDirtyChange: (isDirty) => { setSaveState(isDirty ? 'dirty' : 'saved', isDirty ? '변경사항 있음' : '저장됨'); if (isDirty && state.reconSource === 'golden') drawReconLater(); },
       onSaveStart: () => setSaveState('saving', '저장 중…'),
-      onSaveOk: (updated) => { setSaveState('saved', '저장됨'); refreshAfterDocUpdate(updated); toast('저장했습니다.'); },
+      onSaveOk: (updated) => {
+        const stillDirty = editor.isDirty();
+        setSaveState(stillDirty ? 'dirty' : 'saved', stillDirty ? '변경사항 있음' : '저장됨');
+        refreshAfterDocUpdate(updated);
+        if (!stillDirty) toast('저장했습니다.');
+      },
       onSaveErr: () => setSaveState('dirty', '변경사항 있음'),
       onGoldenCreated: (updated) => { refreshAfterDocUpdate(updated); },
       onHoverBbox,
