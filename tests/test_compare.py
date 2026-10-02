@@ -52,3 +52,55 @@ def test_name_row_gets_code_master_reference():
     for k in (("table", 1, "EDI명칭"), ("table", 0, "EDI코드"), ("field", "", "병명코드")):
         assert "code_master_reference" not in out[k]
     assert "code_master_reference" not in {r["key"]: r for r in compare_bundle(None, {"documents": [doc({})]}, {"documents": [doc({})]})}["병명"]
+
+
+# ── 결과(AO·Harness) 자체가 없는 쪽은 채점하지 않는다 ─────────────────────
+def _cell(key, value, dtype="string"):
+    return {"key": key, "value": value, "dtype": dtype}
+
+
+GOLDEN_DOC = {"doc_type": "세부내역서",
+              "extracted_fields": [_cell("사고발생일자", "20230309")],
+              "extracted_groups": [{"key": "합계", "fields": [_cell("급여_급여총액", None), _cell("비급여총액", "")]}],
+              "extracted_tables": [{"key": "항목내역", "headers": ["EDI코드", "총액"],
+                                    "rows": [[_cell("EDI코드", "AA154"), _cell("총액", "17320", "int")]]}]}
+
+
+def _statuses(rows, side):
+    return {r["path"]: r[f"{side}_status"] for r in rows}
+
+
+def test_golden_only_is_not_scored():
+    """결과가 없으면 Golden 빈칸이 '둘 다 빈칸' MATCH 로, 값 칸이 MISSING 으로 잡혀 정확도가 생기면 안 된다."""
+    from backend.compare import score
+    rows = compare_doc(0, GOLDEN_DOC, None, None)
+    assert rows and all(r["ao_status"] == "" and r["harness_status"] == "" for r in rows)
+    assert score(rows, "ao") is None and score(rows, "harness") is None
+
+
+def test_one_side_present_scores_only_that_side():
+    from backend.compare import score
+    ao = {"doc_type": "세부내역서", "extracted_fields": [_cell("사고발생일자", "20230309")],
+          "extracted_groups": [], "extracted_tables": []}
+    rows = compare_doc(0, GOLDEN_DOC, ao, None)
+    st = _statuses(rows, "ao")
+    # 결과는 있는데 칸이 없으면 기존대로: 값 칸 MISSING, Golden 빈칸 MATCH
+    assert st["documents[0].fields[사고발생일자]"] == "MATCH"
+    assert st["documents[0].groups[합계].fields[비급여총액]"] == "MATCH"
+    assert st["documents[0].tables[항목내역].rows[0].cells[EDI코드]"] == "MISSING"
+    assert score(rows, "ao")["total"] == len(rows)
+    assert all(r["harness_status"] == "" for r in rows)
+    assert score(rows, "harness") is None
+
+
+def test_result_missing_later_document_is_not_scored():
+    """Golden 이 문서 2개, 결과가 1개면 두 번째 문서는 그 결과 쪽 채점에서 빠진다(문서 단위 결과 없음)."""
+    from backend.compare import compare_bundle, score
+    golden = {"documents": [GOLDEN_DOC, GOLDEN_DOC]}
+    ao = {"documents": [GOLDEN_DOC]}
+    rows = compare_bundle(golden, ao, None)
+    doc0 = [r for r in rows if r["doc"] == 0]
+    doc1 = [r for r in rows if r["doc"] == 1]
+    assert all(r["ao_status"] == "MATCH" for r in doc0)
+    assert all(r["ao_status"] == "" for r in doc1)
+    assert score(rows, "ao")["total"] == len(doc0)

@@ -13,6 +13,7 @@ status: active
 
 ## 문서
 
+- [결과가 없는 쪽은 채점하지 않기](2026-10-02-score-without-result.md) — 원본+Golden 만 올린 번들의 가짜 정확도·불일치 제거
 - [2026-10-02 같은 문서 유형이 표기에 따라 다른 유형으로 나뉘던 문제 수정](2026-10-02-doc-type-canon.md)
 - [2026-10-02 원장 명칭(master_reference) 상시 표시](2026-10-02-master-reference-view.md)
 - [2026-10-02 명칭 행 원장 명칭 표시·팝오버 화면 맞춤](2026-10-02-name-row-master-ref.md)

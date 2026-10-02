@@ -89,7 +89,8 @@ storage/bundles/{bundle_id}/
 | `TYPE_MISMATCH` | 정답 dtype 이 `int`/`float`/`number` 인데 결과가 숫자가 아님(비어 있지 않음), 또는 정답은 표인데 결과는 같은 key 의 스칼라 |
 | `MISMATCH` | 그 밖의 다름 |
 
-- 정확도 = MATCH / (전체 셀 수). 전체 셀 수 0 이면 null.
+- 결과 문서 자체가 없는 쪽(파일 없음, 또는 `documents[i]` 없음)은 비교하지 않는다: 그 쪽 status 는 `""`, 점수에서 빠진다. 결과 문서는 있는데 칸이 없을 때만 `MISSING`·`MATCH(둘 다 "")` 로 판정한다.
+- 정확도 = MATCH / (전체 셀 수). 전체 셀 수 0 이면 null(화면 `—`). 원본+Golden 만 올린 번들은 AO·Harness 모두 null, 불일치 0.
 
 ## 엔드포인트
 

@@ -658,3 +658,20 @@ def test_static_version_and_gzip(client: TestClient):
     assert client.get(f"/static/{ver}/app.js").headers["cache-control"].endswith("immutable")
     assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
     assert client.get("/", headers={"accept-encoding": "gzip"}).headers["content-encoding"] == "gzip"
+
+
+def test_golden_only_bundle_has_no_score_or_mismatch(client: TestClient, tmp_path: Path):
+    """원본+Golden 만 올린 번들은 목록·상세 모두 점수 없음(None)·불일치 0 이어야 한다."""
+    golden = {"documents": [{"doc_type": "세부내역서", "extracted_fields": [{"key": "사고발생일자", "value": "20230309", "dtype": "string"}],
+                             "extracted_groups": [{"key": "합계", "fields": [{"key": "비급여총액", "value": None, "dtype": "string"}]}],
+                             "extracted_tables": []}]}
+    files = [("files", ("original/G001.png", b"\x89PNG\r\n\x1a\n", "image/png")),
+             ("files", ("golden/G001.answer.json", json.dumps(golden).encode(), "application/json"))]
+    resp = client.post("/api/bundles", files=files, data={"name": "golden-only"})
+    assert resp.status_code == 201, resp.text
+    summary = next(d for d in resp.json()["docs"] if d["id"] == "G001")
+    assert summary["score"] == {"ao": None, "harness": None}
+    assert summary["mismatch"] == 0
+    doc = client.get(f"/api/bundles/{resp.json()['id']}/docs/G001").json()
+    assert doc["score"] == {"ao": None, "harness": None}
+    assert doc["compare"] and all(r["ao_status"] == "" and r["harness_status"] == "" for r in doc["compare"])

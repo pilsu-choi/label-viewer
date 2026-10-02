@@ -174,13 +174,15 @@ def _ui_bbox_index(doc: dict | None) -> dict[tuple[str, str, Any, str], list[dic
 
 def _row(doc_i: int, area: str, container: str, row: Any, key: str, dtype: str,
          gcell: dict | None, acell: dict | None, hcell: dict | None,
-         ui_bbox: list[dict] | None = None, receipt: bool = False) -> dict:
+         ui_bbox: list[dict] | None = None, receipt: bool = False,
+         sides: tuple[bool, bool] = (True, True)) -> dict:
     gval = (gcell or {}).get("value") if gcell is not None else None
     aval = acell.get("value") if acell is not None else None
     hval = harness_value(hcell) if hcell is not None else None
     has_golden = gcell is not None
-    ao_status = cell_status(dtype, gval, aval, key, receipt) if (has_golden or acell is not None) else ""
-    harness_status = cell_status(dtype, gval, hval, key, receipt) if (has_golden or hcell is not None) else ""
+    # sides: 그 문서의 AO·Harness 결과가 있는지. 결과 자체가 없으면 빈 값과 비교하지 않고 판정을 비운다("" = 비교 안 함)
+    ao_status = cell_status(dtype, gval, aval, key, receipt) if sides[0] and (has_golden or acell is not None) else ""
+    harness_status = cell_status(dtype, gval, hval, key, receipt) if sides[1] and (has_golden or hcell is not None) else ""
     if area == "table":
         path = f"documents[{doc_i}].tables[{container}].rows[{row}].cells[{key}]"
     elif area == "group":
@@ -215,7 +217,8 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
     ai = DocIndex(adoc, is_harness=False)
     hi = DocIndex(hdoc, is_harness=True)
     ui_boxes = _ui_bbox_index(ui_doc)
-    make_row = partial(_row, receipt=canon(base.get("doc_type")) == "진료비영수증")
+    make_row = partial(_row, receipt=canon(base.get("doc_type")) == "진료비영수증",
+                       sides=(adoc is not None, hdoc is not None))
     rows: list[dict] = []
     consumed_a: set[int] = set()
     consumed_h: set[int] = set()
