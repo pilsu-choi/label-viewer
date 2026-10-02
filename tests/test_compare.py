@@ -1,4 +1,4 @@
-from backend.compare import cell_status
+from backend.compare import cell_status, compare_doc
 
 
 def test_label_print_variants_match():
@@ -17,3 +17,13 @@ def test_label_misread_still_mismatch():
 def test_total_alias_receipt_only():
     assert cell_status("string", "계", "합계", "항목", receipt=True) == "MATCH"
     assert cell_status("string", "계", "합계", "항목") == "MISMATCH"
+
+
+def test_master_reference_passthrough_in_evidence():
+    ref = {"system_id": "EDI:의치과_급여", "code": "D1890002", "name": "γ-GTP [화학반응-장비측정]"}
+    cell = lambda **h: {"key": "항목", "value": "강마지티피", "dtype": "string", "harness": {"final_value": "강마지티피", **h}}
+    doc = lambda c: {"extracted_fields": [c], "extracted_groups": [], "extracted_tables": []}
+    for extra in ({"master_reference": ref, "candidates": ["D1890002", "D1890003"]}, {"master_reference": {"name": "x"}}, {}):
+        (row,) = compare_doc(0, doc(cell()), doc(cell()), doc(cell(**extra)))
+        assert row["evidence"].get("master_reference") == extra.get("master_reference")
+        assert row["evidence"].get("candidates") == extra.get("candidates")

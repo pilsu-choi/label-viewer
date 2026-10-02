@@ -92,7 +92,7 @@ def field(key, value, dtype="string", confidence=0.98):
 
 
 def harness_block(tier, final_value, ao_value=None, correction_basis=None, decision_rule_no="1",
-                   rule_result="pass", rule_detail="") -> dict:
+                   rule_result="pass", rule_detail="", master_reference=None, candidates=None) -> dict:
     return {
         "tier": tier,
         "evidence": {
@@ -105,14 +105,16 @@ def harness_block(tier, final_value, ao_value=None, correction_basis=None, decis
         "final_value": final_value,
         "decision_rule_no": decision_rule_no,
         **({"correction_basis": correction_basis} if correction_basis else {}),
+        **({"master_reference": master_reference} if master_reference else {}),
+        **({"candidates": candidates} if candidates else {}),
     }
 
 
 def harness_field(key, ao_value, final_value, dtype="string", tier="pass", correction_basis=None,
-                   rule_result="pass", rule_detail=""):
+                   rule_result="pass", rule_detail="", **ref):
     c = field(key, ao_value, dtype)
     c["harness"] = harness_block(tier, final_value, ao_value, correction_basis, rule_result=rule_result,
-                                  rule_detail=rule_detail)
+                                  rule_detail=rule_detail, **ref)
     return c
 
 
@@ -174,7 +176,9 @@ def build(out: Path) -> None:
                                      correction_basis="rule", rule_result="fail",
                                      rule_detail="금액 형식 오류 → 규칙 재계산")]
     mc001_h_table = [{"key": "항목내역", "field_code": None, "headers": ["항목", "금액"], "rows": [
-        [field("항목", "진찰료", "string"), harness_field("금액", "33000", "35000", "int", tier="repaired",
+        [harness_field("항목", "진찰료", "진찰료", master_reference={"system_id": "EDI:의치과_급여", "code": "AA154", "name": "초진 진찰료"},
+                       candidates=["AA154", "AA254"]),
+         harness_field("금액", "33000", "35000", "int", tier="repaired",
                                                         correction_basis="rule", rule_result="fail",
                                                         rule_detail="합계 불일치 → 원문 재검산")],
         [field("항목", "처치료", "string"), field("금액", "12000", "int")],

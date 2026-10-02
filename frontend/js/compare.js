@@ -74,6 +74,7 @@ function valueCell(kind, label, e, goldenVal, onAdopt) {
   const goldenEmpty = goldenVal == null || goldenVal === '';
   const valSpan = goldenEmpty ? el('span', { class: 'cmp-val' }, value == null || value === '' ? '—' : String(value)) : diffSpan(goldenVal, value);
   const body = [statusBadge(status), valSpan];
+  const mr = kind === 'harness' && e.evidence && e.evidence.master_reference;
   if (onAdopt) {
     const tip = `${label} ${adoptable(value) === '' ? '빈 ' : ''}값을 Golden에 채택`;
     body.push(el('button', {
@@ -81,7 +82,8 @@ function valueCell(kind, label, e, goldenVal, onAdopt) {
       onclick: (ev) => { ev.stopPropagation(); onAdopt(e, adoptable(value)); },
     }, '채택'));
   }
-  return el('td', {}, el('div', { class: 'cmp-cell' }, body));
+  const cell = el('div', { class: 'cmp-cell' }, body);
+  return el('td', {}, mr && mr.name ? [cell, el('div', { class: 'cmp-master-ref' }, `원장${mr.code ? `(${mr.code})` : ''} ${mr.name}`)] : cell);
 }
 
 // 점수 카드의 압축 한 줄 요약(제목·정확도·작은 상태 막대). scoreCard() 와 같은 톤(STATUS_TONE)을 쓴다.
@@ -123,9 +125,14 @@ function evidencePopover(entry, onAdopt) {
       box.appendChild(el('div', { class: 'ev-row' }, [el('span', {}, evi.reread.status || ''), el('span', {}, evi.reread.value == null ? '—' : String(evi.reread.value))]));
       if (evi.reread.detail) box.appendChild(el('div', { class: 'hint' }, evi.reread.detail));
     }
-    if (evi.master) {
+    const mr = ev.master_reference;
+    const cands = Array.isArray(ev.candidates) ? ev.candidates : [];
+    if (evi.master || mr || cands.length) {
       box.appendChild(el('h5', { style: 'margin-top:10px' }, '마스터 대조'));
-      box.appendChild(el('div', { class: 'ev-row' }, [el('span', {}, '상태'), el('span', {}, evi.master.status || '')]));
+      const row = (k, v) => box.appendChild(el('div', { class: 'ev-row' }, [el('span', {}, k), el('span', {}, v)]));
+      if (evi.master) row('상태', evi.master.status || '');
+      if (mr) row('원장 명칭', [mr.name, mr.code, mr.system_id].filter(Boolean).join(' · '));
+      if (cands.length) row('후보 코드', cands.map((c) => (c && typeof c === 'object' ? c.code || c.name || JSON.stringify(c) : String(c))).join(', '));
     }
   }
   box.appendChild(el('details', { class: 'ev-detail' }, [
