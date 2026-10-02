@@ -579,6 +579,54 @@ def test_upload_hardening(client: TestClient):
     assert len(client.post("/api/bundles", files=many).json()["docs"]) == 1100
 
 
+def test_upload_bad_zip_entry_leaves_no_bundle(client: TestClient):
+    """암호·손상 ZIP 항목은 400이고 반쯤 만들어진 번들을 남기지 않는다."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("b/original/ok.png", _png())
+        zf.writestr("b/original/bad.png", _png() * 50)
+    corrupt = bytearray(buf.getvalue())
+    corrupt[corrupt.index(b"bad.png") + len("bad.png") + 20] ^= 0xFF  # bad.png 압축 데이터 손상
+    for blob in (bytes(corrupt), _encrypted_zip()):
+        assert client.post("/api/bundles", files=[("files", ("x.zip", blob, "application/zip"))]).status_code == 400
+        assert client.get("/api/bundles").json() == []
+
+
+def _encrypted_zip() -> bytes:
+    """암호 플래그(bit 0)를 켠 항목이 든 ZIP."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("b/original/enc.png", _png())
+        zf.infolist()[0].flag_bits |= 0x1
+    raw = bytearray(buf.getvalue())
+    raw[raw.index(b"PK\x03\x04") + 6] |= 0x1  # 로컬 헤더 플래그도 맞춘다
+    return bytes(raw)
+
+
+def test_upload_content_length_over_limit_rejected_early(tmp_path: Path):
+    client = TestClient(create_app(tmp_path / "storage", max_upload_mb=1))
+    r = client.post("/api/bundles", files=[("files", ("b/original/a.png", b"x" * (1024 * 1024 + 1), "image/png"))])
+    assert r.status_code == 413 and "upload too large" in r.json()["detail"]
+    assert client.get("/api/bundles").json() == []
+
+
+def test_upload_streams_without_loading_payload(client: TestClient, monkeypatch):
+    """업로드 내용을 메모리로 읽지 않는다(UploadFile.read 미호출). 테스트 클라이언트가 본문을 들고 있어 tracemalloc은 쓰지 않는다."""
+    import os
+    from starlette.datastructures import UploadFile
+
+    def boom(*a, **k):
+        raise AssertionError("UploadFile.read called")
+    monkeypatch.setattr(UploadFile, "read", boom)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for i in range(10):
+            zf.writestr(f"b/original/{i}.png", os.urandom(2 * 1024 * 1024))
+    body = buf.getvalue()
+    r = client.post("/api/bundles", files=[("files", ("b.zip", body, "application/zip"))])
+    assert r.status_code == 201 and len(r.json()["docs"]) == 10
+
+
 # ── 성능(캐시·썸네일·정적 버전) ────────────────────────────────────────────
 
 def test_image_thumbnail_and_cache_header(client: TestClient, bundle: dict):

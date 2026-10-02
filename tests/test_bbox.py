@@ -1,3 +1,4 @@
+import io
 import sys
 from pathlib import Path
 
@@ -77,7 +78,7 @@ def test_ao_ui_response_in_ao_extract_keeps_ao_kind():
 def test_sidecar_only_upload_returns_clear_error(tmp_path):
     path = "dummy/ao_ui/D2-DET-001.png.aiocr.ui.json"
     try:
-        process_upload(tmp_path, [(path, b"{}")], None, 10000)
+        process_upload(tmp_path, [(path, io.BytesIO(b"{}"))], None, 10000)
     except ApiError as error:
         assert error.status == 400
         assert "AO UI sidecar" in error.message
@@ -89,7 +90,7 @@ def test_doc_detail_exposes_optional_ao_ui_sidecar(tmp_path):
     image = "dummy/original/D2-DET-001.png"
     ao = "dummy/ao_extract/D2-DET-001.png.aiocr.ui.json"
     sidecar = "dummy/ao_ui/D2-DET-001.png.aiocr.ui.json"
-    bundle_id = process_upload(tmp_path, [(image, b"image"), (ao, b'{"documents":[]}'), (sidecar, b'{"documents":[]}')], None, 10000)
+    bundle_id = process_upload(tmp_path, [(image, io.BytesIO(b"image")), (ao, io.BytesIO(b'{"documents":[]}')), (sidecar, io.BytesIO(b'{"documents":[]}'))], None, 10000)
 
     has = doc_detail(tmp_path, bundle_id, "D2-DET-001")["has"]
     assert has["original"] is True
@@ -110,7 +111,7 @@ def test_ao_ui_response_in_ao_extract_is_canonicalized_but_raw_is_preserved(tmp_
     }}]}
     import json
     raw = json.dumps(response, ensure_ascii=False).encode()
-    bundle_id = process_upload(tmp_path, [(image, b"image"), (ao_path, raw)], None, 10000)
+    bundle_id = process_upload(tmp_path, [(image, io.BytesIO(b"image")), (ao_path, io.BytesIO(raw))], None, 10000)
     detail = create_golden(tmp_path, bundle_id, "D2-DET-001", "ao")
     doc = detail["ao"]["documents"][0]
 
@@ -137,7 +138,7 @@ def test_run_result_harness_without_documents_creates_golden_draft(tmp_path):
     files = [("out/original/D1.png", b"image"),
              ("out/harness/D1.harness.json", json.dumps(run).encode()),
              ("out/ao_extract/D1.aiocr.json", json.dumps(run).encode())]
-    bundle_id = process_upload(tmp_path, files, None, 10000)
+    bundle_id = process_upload(tmp_path, [(p, io.BytesIO(d)) for p, d in files], None, 10000)
     doc = create_golden(tmp_path, bundle_id, "D1", "harness")["golden"]["documents"][0]
 
     assert doc["doc_type"] == "receipt"

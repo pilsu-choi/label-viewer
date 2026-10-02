@@ -17,6 +17,7 @@ status: active
 - [2026-10-02 원장 명칭(master_reference) 상시 표시](2026-10-02-master-reference-view.md)
 - [2026-10-02 명칭 행 원장 명칭 표시·팝오버 화면 맞춤](2026-10-02-name-row-master-ref.md)
 - [2026-10-02 이미지 기본 보기를 전처리로](2026-10-02-default-preprocessed-view.md)
+- [2026-10-02 업로드를 메모리에 올리지 않고 스트리밍으로 저장](2026-10-02-streaming-upload.md)
 - [2026-10-01 문서 활성·비활성, 범위별 집계·내보내기, 목록 페이지네이션](2026-10-01-doc-enable-pagination.md)
 - [2026-09-29 문서 유형 필터와 편집 탭 표 다중 셀 일괄 입력](2026-09-29-doctype-filter-multicell.md)
 - [2026-09-30 전체 묶음 ZIP 내보내기](2026-09-30-bundle-export-zip.md)

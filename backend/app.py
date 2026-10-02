@@ -10,6 +10,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
@@ -85,14 +86,20 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
 
     @app.post("/api/bundles", status_code=201)
     async def upload_bundle(request: Request):
+        limit = request.app.state.max_upload_bytes
+        length = request.headers.get("content-length", "")
+        call(B.check_upload_size, int(length) if length.isdigit() else 0, limit)  # 본문 파싱 전 조기 거절
         # Starlette 기본 한도(파일 1000개)로는 200건 넘는 폴더 업로드가 막힌다
         form = await request.form(max_files=100_000, max_fields=100_000)
-        files = [f for f in form.getlist("files") if isinstance(f, UploadFile)]
-        if not files:
-            raise HTTPException(422, "files required")
-        name = form.get("name") or None
-        collected = [(f.filename, await f.read()) for f in files]
-        bid = call(B.process_upload, data_dir, collected, name, request.app.state.max_upload_bytes)
+        try:
+            files = [f for f in form.getlist("files") if isinstance(f, UploadFile)]
+            if not files:
+                raise HTTPException(422, "files required")
+            name = form.get("name") or None
+            # 업로드는 임시 파일로 스풀링되므로 내용을 읽지 않고 파일째 넘기고, 복사는 이벤트 루프 밖 스레드에서 한다
+            bid = await run_in_threadpool(call, B.process_upload, data_dir, [(f.filename, f.file) for f in files], name, limit)
+        finally:
+            await form.close()
         return call(B.bundle_view, data_dir, bid)
 
     @app.get("/api/bundles")
