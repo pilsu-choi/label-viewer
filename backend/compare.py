@@ -321,6 +321,22 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
     return rows
 
 
+# 원장 명칭을 가진 코드 키 → 그 코드와 같은 행/문서의 명칭 키 (harness pipeline/master_evidence.py DEFAULT_PAIRS 와 같은 짝).
+CODE_NAME_PAIRS = {"EDI코드": "EDI명칭", "병명코드": "병명"}
+
+
+def _attach_code_reference(rows: list[dict]) -> None:
+    """명칭 셀에는 하네스가 evidence 를 달지 않으므로, 같은 행(표) 또는 같은 문서(필드)의 코드 셀 master_reference 를
+    명칭 행의 `code_master_reference` 로 복사한다(표시 전용)."""
+    scope = lambda r: (r["doc"], r["area"], r["container"], r["row"])
+    refs = {(scope(r), r["key"]): (r["evidence"] or {}).get("master_reference") for r in rows if r["key"] in CODE_NAME_PAIRS}
+    names = {v: k for k, v in CODE_NAME_PAIRS.items()}
+    for r in rows:
+        ref = r["key"] in names and refs.get((scope(r), names[r["key"]]))
+        if ref:
+            r["code_master_reference"] = ref
+
+
 def compare_bundle(golden: dict | None, ao: dict | None, harness: dict | None,
                    ao_ui: dict | None = None) -> list[dict]:
     gdocs = (golden or {}).get("documents") or []
@@ -338,6 +354,7 @@ def compare_bundle(golden: dict | None, ao: dict | None, harness: dict | None,
         ui_docs = (ao_ui or {}).get("documents") or []
         ui_doc = ui_docs[i] if i < len(ui_docs) else None
         rows += compare_doc(i, gdoc, adoc, hdoc, ui_doc)
+    _attach_code_reference(rows)
     return rows
 
 

@@ -74,7 +74,7 @@ function valueCell(kind, label, e, goldenVal, onAdopt) {
   const goldenEmpty = goldenVal == null || goldenVal === '';
   const valSpan = goldenEmpty ? el('span', { class: 'cmp-val' }, value == null || value === '' ? '—' : String(value)) : diffSpan(goldenVal, value);
   const body = [statusBadge(status), valSpan];
-  const mr = kind === 'harness' && e.evidence && e.evidence.master_reference;
+  const mr = kind === 'harness' && ((e.evidence && e.evidence.master_reference) || e.code_master_reference);
   if (onAdopt) {
     const tip = `${label} ${adoptable(value) === '' ? '빈 ' : ''}값을 Golden에 채택`;
     body.push(el('button', {
@@ -135,6 +135,11 @@ function evidencePopover(entry, onAdopt) {
       if (cands.length) row('후보 코드', cands.map((c) => (c && typeof c === 'object' ? c.code || c.name || JSON.stringify(c) : String(c))).join(', '));
     }
   }
+  const codeRef = !(ev && ev.master_reference) && entry.code_master_reference;
+  if (codeRef) {
+    box.appendChild(el('h5', { style: 'margin-top:10px' }, '마스터 대조'));
+    box.appendChild(el('div', { class: 'ev-row' }, [el('span', {}, '원장 명칭(같은 행 코드 기준)'), el('span', {}, [codeRef.name, codeRef.code, codeRef.system_id].filter(Boolean).join(' · '))]));
+  }
   box.appendChild(el('details', { class: 'ev-detail' }, [
     el('summary', {}, '상세'),
     el('div', { class: 'ev-row' }, [
@@ -189,8 +194,9 @@ function hidePop() {
 function positionPop(x, y) {
   if (!popEl) return;
   const vw = window.innerWidth, vh = window.innerHeight;
-  const r = popEl.getBoundingClientRect();
   const gap = 8;
+  popEl.style.maxHeight = `${vh - 2 * gap}px`; // 화면보다 길면 잘리지 않고 팝오버 내부 스크롤
+  const r = popEl.getBoundingClientRect();
   const rowRect = anchorRow && anchorRow.getBoundingClientRect();
   let top;
   if (rowRect) {
@@ -213,6 +219,7 @@ function openPop(tr, entry, x, y, onHoverBbox, onAdopt) {
   popEl = evidencePopover(entry, onAdopt);
   popEl.addEventListener('mouseenter', clearHideTimer);
   popEl.addEventListener('mouseleave', () => { if (!pinned) scheduleHide(); });
+  popEl.addEventListener('toggle', () => positionPop(x, y), true); // '상세' 펼침으로 길어져도 뷰포트 안에 맞춘다
   document.body.appendChild(popEl);
   anchorRow = tr;
   positionPop(x, y);
