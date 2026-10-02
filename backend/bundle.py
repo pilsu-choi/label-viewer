@@ -11,6 +11,7 @@ import shutil
 import time
 import unicodedata
 import zipfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Callable
@@ -204,44 +205,54 @@ def _zip_name(info: zipfile.ZipInfo) -> str:
     return info.filename
 
 
-def _iter_zip(fp: BinaryIO) -> list[tuple[str, bytes]]:
+_ZIP_ERRORS = (RuntimeError, zipfile.BadZipFile, zlib.error, EOFError)  # 암호·손상 항목
+
+
+def _zip_entries(zf: zipfile.ZipFile) -> list[tuple[str, zipfile.ZipInfo]]:
+    """항목 이름만 모은다. 내용은 _write_entries 가 하나씩 열어 복사한다."""
     out = []
-    try:
-        zf = zipfile.ZipFile(fp)
-    except zipfile.BadZipFile:
-        raise ApiError(400, "ZIP 파일을 열 수 없습니다.")
-    with zf:
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            name = _zip_name(info)
-            norm = PurePosixPath(name)
-            if norm.is_absolute() or ".." in norm.parts:
-                continue  # zip slip 방지
-            try:
-                out.append((name, zf.read(info)))
-            except (RuntimeError, zipfile.BadZipFile) as e:  # 암호·손상 항목
-                raise ApiError(400, f"ZIP 항목을 읽을 수 없습니다: {name} ({e})")
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        name = _zip_name(info)
+        norm = PurePosixPath(name)
+        if norm.is_absolute() or ".." in norm.parts:
+            continue  # zip slip 방지
+        out.append((name, info))
     return out
 
 
-def process_upload(data_dir: Path, files: list[tuple[str, bytes]], name: str | None,
-                    max_upload_bytes: int) -> str:
-    """업로드 파일 목록(zip 1개 또는 폴더식 다중 파일)을 분류해 번들을 만든다."""
-    total = sum(len(b) for _, b in files)
+def _size(f: BinaryIO) -> int:
+    f.seek(0, 2)
+    n = f.tell()
+    f.seek(0)
+    return n
+
+
+def check_upload_size(total: int, max_upload_bytes: int) -> None:
     if total > max_upload_bytes:
         raise ApiError(413, f"upload too large: {total} > {max_upload_bytes} bytes")
-    if len(files) == 1 and files[0][0].lower().endswith(".zip"):
-        import io
-        entries = _iter_zip(io.BytesIO(files[0][1]))
-        bundle_name = name or Path(files[0][0]).stem
-    else:
-        entries = files
-        bundle_name = name or (PurePosixPath(files[0][0]).parts[0] if files and len(files[0][0].split("/")) > 1
-                                else "bundle")
 
+
+def process_upload(data_dir: Path, files: list[tuple[str, BinaryIO]], name: str | None,
+                    max_upload_bytes: int) -> str:
+    """업로드 파일 목록(zip 1개 또는 폴더식 다중 파일)을 분류해 번들을 만든다. 내용은 메모리에 올리지 않고 파일로 복사한다."""
+    check_upload_size(sum(_size(f) for _, f in files), max_upload_bytes)
+    if len(files) == 1 and files[0][0].lower().endswith(".zip"):
+        try:
+            zf = zipfile.ZipFile(files[0][1])
+        except zipfile.BadZipFile:
+            raise ApiError(400, "ZIP 파일을 열 수 없습니다.")
+        with zf:
+            return _create_bundle(data_dir, name or Path(files[0][0]).stem, _zip_entries(zf), zf.open)
+    return _create_bundle(data_dir, name or (PurePosixPath(files[0][0]).parts[0] if files and len(files[0][0].split("/")) > 1
+                                              else "bundle"), files)
+
+
+def _create_bundle(data_dir: Path, bundle_name: str, entries: list[tuple[str, Any]],
+                   open_src: Callable[[Any], BinaryIO] = lambda f: f) -> str:
     # macOS NFD 파일명을 NFC로 맞춰 폴더 키 인식과 다른 출처 파일과의 문서 매칭을 보장한다
-    entries = [(unicodedata.normalize("NFC", relpath), data) for relpath, data in entries]
+    entries = [(unicodedata.normalize("NFC", relpath), src) for relpath, src in entries]
     kinds = {classify(relpath) for relpath, _ in entries}
     if not kinds.intersection(DOC_KINDS):
         if "ao_ui" in kinds:
@@ -252,18 +263,20 @@ def process_upload(data_dir: Path, files: list[tuple[str, bytes]], name: str | N
     bdir = bundle_dir(data_dir, bid)
     bdir.mkdir(parents=True, exist_ok=True)
     try:
-        _write_entries(bdir, entries)
-    except OSError as e:
+        _write_entries(bdir, entries, open_src)
+    except Exception as e:  # 실패한 업로드는 번들을 남기지 않는다
         shutil.rmtree(bdir, ignore_errors=True)
-        raise ApiError(400, f"파일을 저장하지 못했습니다(파일명이 너무 길 수 있음): {e.filename or e}")
+        if isinstance(e, OSError):
+            raise ApiError(400, f"파일을 저장하지 못했습니다(파일명이 너무 길 수 있음): {e.filename or e}")
+        raise
 
     save_state(bdir, {"name": bundle_name, "created_at": datetime.now(timezone.utc).isoformat(), "review": {}})
     return bid
 
 
-def _write_entries(bdir: Path, entries: list[tuple[str, bytes]]) -> None:
+def _write_entries(bdir: Path, entries: list[tuple[str, Any]], open_src: Callable[[Any], BinaryIO]) -> None:
     used: dict[tuple[str, str], int] = {}
-    for relpath, data in entries:
+    for relpath, src in entries:
         kind = classify(relpath)
         if kind is None:
             continue
@@ -277,7 +290,11 @@ def _write_entries(bdir: Path, entries: list[tuple[str, bytes]]) -> None:
             continue
         dest = bdir / kind / f"{final_id}{ext}"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
+        try:
+            with open_src(src) as s, open(dest, "wb") as dst:
+                shutil.copyfileobj(s, dst)
+        except _ZIP_ERRORS as e:
+            raise ApiError(400, f"ZIP 항목을 읽을 수 없습니다: {relpath} ({e})")
 
 
 # ── 문서 조회 ─────────────────────────────────────────────────────────────
