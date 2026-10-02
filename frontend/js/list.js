@@ -39,10 +39,10 @@ function thumbImg(bundleId, doc) {
     wrap.appendChild(el('span', { class: 'ph' }, 'No Image'));
     return wrap;
   }
-  const view = doc.has.original ? 'original' : 'preprocessed';
+  const view = doc.has.preprocessed ? 'preprocessed' : 'original';
   const img = el('img', { loading: 'lazy', decoding: 'async', src: api.imageUrl(bundleId, doc.id, view, 1, THUMB_W), alt: doc.id });
   img.addEventListener('error', () => {
-    if (view === 'original' && doc.has.preprocessed) { img.src = api.imageUrl(bundleId, doc.id, 'preprocessed', 1, THUMB_W); }
+    if (view === 'preprocessed' && doc.has.original) { img.src = api.imageUrl(bundleId, doc.id, 'original', 1, THUMB_W); }
     else { clear(wrap); wrap.appendChild(el('span', { class: 'ph' }, 'No Image')); }
   }, { once: true });
   wrap.appendChild(img);
