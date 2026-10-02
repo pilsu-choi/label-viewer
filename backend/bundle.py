@@ -244,7 +244,10 @@ def process_upload(data_dir: Path, files: list[tuple[str, BinaryIO]], name: str 
         except zipfile.BadZipFile:
             raise ApiError(400, "ZIP 파일을 열 수 없습니다.")
         with zf:
-            return _create_bundle(data_dir, name or Path(files[0][0]).stem, _zip_entries(zf), zf.open)
+            entries = _zip_entries(zf)
+            # Compressed upload size alone does not constrain the extracted payload.
+            check_upload_size(sum(info.file_size for _, info in entries), max_upload_bytes)
+            return _create_bundle(data_dir, name or Path(files[0][0]).stem, entries, zf.open)
     return _create_bundle(data_dir, name or (PurePosixPath(files[0][0]).parts[0] if files and len(files[0][0].split("/")) > 1
                                               else "bundle"), files)
 
@@ -343,7 +346,15 @@ def _load_json(path: Path, canonical: bool) -> tuple[dict | None, str | None]:
     docs = data.get("documents", []) if isinstance(data, dict) else None
     if not isinstance(docs, list) or not all(isinstance(d, dict) for d in docs):
         return None, "JSON 형식 오류: 최상위 객체와 documents 객체 목록이 필요합니다"
-    return (canonical_doc(data) if canonical else data), None
+    if canonical:
+        try:
+            data = canonical_doc(data)
+            _validate_golden(data, set_defaults=False)
+        except ApiError as e:
+            return None, f"JSON 형식 오류: {e.message}"
+        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            return None, f"JSON 형식 오류: {e}"
+    return data, None
 
 
 def read_json_text(path: Path) -> str:
@@ -700,8 +711,17 @@ def golden_path(bdir: Path, doc_id: str) -> Path:
     return bdir / "golden" / f"{doc_id}.json"
 
 
+def _require_doc(bdir: Path, doc_id: str) -> None:
+    if not bdir.is_dir():
+        raise ApiError(404, "bundle not found")
+    if doc_id not in doc_ids(bdir):
+        raise ApiError(404, "document not found")
+
+
 def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_type: str | None = None) -> dict:
     bdir = bundle_dir(data_dir, bundle_id)
+    _safe_id(doc_id, "doc_id")
+    _require_doc(bdir, doc_id)
     gpath = golden_path(bdir, doc_id)
     if gpath.exists():
         raise ApiError(409, "golden already exists")
@@ -723,7 +743,9 @@ def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_
         raise ApiError(422, f"invalid source: {source}")
     name = canon(doc_type)
     if name:
-        docs = data.setdefault("documents", [copy.deepcopy(EMPTY_GOLDEN["documents"][0])])
+        docs = data.setdefault("documents", [])
+        if not docs:
+            docs.append(copy.deepcopy(EMPTY_GOLDEN["documents"][0]))
         if canon(docs[0].get("doc_type")) != name:
             docs[0] = apply_template(docs[0], name)
         else:
@@ -732,31 +754,67 @@ def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_
     return doc_detail(data_dir, bundle_id, doc_id)
 
 
-def _validate_golden(data: Any) -> None:
+def _validate_golden(data: Any, set_defaults: bool = True) -> None:
     if not isinstance(data, dict) or not isinstance(data.get("documents"), list):
         raise ApiError(422, "golden must have a 'documents' list")
     for doc in data["documents"]:
         if not isinstance(doc, dict):
             raise ApiError(422, "each document must be an object")
-        cells = [*(doc.get("extracted_fields") or []),
-                 *(c for g in doc.get("extracted_groups") or [] if isinstance(g, dict) for c in g.get("fields") or []),
-                 *(c for t in doc.get("extracted_tables") or [] if isinstance(t, dict)
-                   for row in t.get("rows") or [] if isinstance(row, list) for c in row)]
-        for c in cells:
-            if not isinstance(c, dict) or "key" not in c:
-                raise ApiError(422, "cell must be an object with 'key'")
-            c.setdefault("dtype", "string")
+        if doc.get("doc_type") is not None and not isinstance(doc.get("doc_type"), str):
+            raise ApiError(422, "doc_type must be a string")
+
+        def records(value: Any, path: str) -> list:
+            if value is None:
+                return []
+            if not isinstance(value, list):
+                raise ApiError(422, f"{path} must be a list")
+            return value
+
+        def key_of(value: Any, path: str) -> str:
+            if not isinstance(value, dict) or not isinstance(value.get("key"), str):
+                raise ApiError(422, f"{path} must be an object with a string 'key'")
+            return value["key"]
+
+        def validate_cell(cell: Any, path: str) -> None:
+            key_of(cell, path)
+            dtype = cell.get("dtype")
+            if dtype is None:
+                if set_defaults:
+                    cell["dtype"] = "string"
+            elif not isinstance(dtype, str):
+                raise ApiError(422, f"{path}.dtype must be a string")
+
+        for i, cell in enumerate(records(doc.get("extracted_fields"), "extracted_fields")):
+            validate_cell(cell, f"extracted_fields[{i}]")
+        for i, group in enumerate(records(doc.get("extracted_groups"), "extracted_groups")):
+            key_of(group, f"extracted_groups[{i}]")
+            for j, cell in enumerate(records(group.get("fields"), f"extracted_groups[{i}].fields")):
+                validate_cell(cell, f"extracted_groups[{i}].fields[{j}]")
+        for i, table in enumerate(records(doc.get("extracted_tables"), "extracted_tables")):
+            key_of(table, f"extracted_tables[{i}]")
+            headers = records(table.get("headers"), f"extracted_tables[{i}].headers")
+            if not all(isinstance(header, str) for header in headers):
+                raise ApiError(422, f"extracted_tables[{i}].headers must contain strings")
+            for j, row in enumerate(records(table.get("rows"), f"extracted_tables[{i}].rows")):
+                if not isinstance(row, list):
+                    raise ApiError(422, f"extracted_tables[{i}].rows[{j}] must be a list")
+                for k, cell in enumerate(row):
+                    validate_cell(cell, f"extracted_tables[{i}].rows[{j}][{k}]")
 
 
 def save_golden(data_dir: Path, bundle_id: str, doc_id: str, data: Any) -> dict:
     _validate_golden(data)
     bdir = bundle_dir(data_dir, bundle_id)
+    _safe_id(doc_id, "doc_id")
+    _require_doc(bdir, doc_id)
     _atomic_write_json(golden_path(bdir, doc_id), data)
     return doc_detail(data_dir, bundle_id, doc_id)
 
 
 def delete_golden(data_dir: Path, bundle_id: str, doc_id: str) -> None:
     bdir = bundle_dir(data_dir, bundle_id)
+    _safe_id(doc_id, "doc_id")
+    _require_doc(bdir, doc_id)
     p = golden_path(bdir, doc_id)
     if p.exists():
         p.unlink()

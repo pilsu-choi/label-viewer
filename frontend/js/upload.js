@@ -107,7 +107,7 @@ export function renderUpload(root) {
       return;
     }
     const list = el('div', { class: 'recent-list' });
-    for (const b of state.bundles) {
+    for (const b of state.bundles.slice(0, 5)) {
       const c = b.counts || {};
       const open = () => navigate(`#/b/${encodeURIComponent(b.id)}`);
       list.appendChild(el('div', { class: 'recent-item', tabindex: '0', onclick: open, onkeydown: (e) => { if (e.key === 'Enter') open(); } }, [
@@ -150,13 +150,14 @@ export function renderUpload(root) {
 
     recentHost = el('div', { class: 'recent-list' });
     const recentPanel = el('div', { class: 'recent-panel' }, [
-      el('h2', {}, '최근 번들'),
+      el('div', { class: 'recent-head' }, [el('h2', {}, '최근 번들'), el('a', { href: '#/bundles' }, '모든 번들 보기')]),
       recentHost,
     ]);
 
     mount(screen, [
       el('header', { class: 'upload-head' }, [
         el('a', { class: 'brand', href: '#/' }, 'Label Viewer'),
+        el('a', { class: 'btn ghost sm', href: '#/bundles' }, '전체 번들'),
       ]),
       el('div', { class: 'upload-main' }, [
         el('div', { class: 'upload-intro' }, [

@@ -139,12 +139,12 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     @app.post("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def post_golden(bundle_id: str, doc_id: str, request: Request):
         body = await json_body(request)
-        return call(B.create_golden, data_dir, bundle_id, doc_id, body.get("from", "empty"), body.get("doc_type"))
+        return await run_in_threadpool(call, B.create_golden, data_dir, bundle_id, doc_id, body.get("from", "empty"), body.get("doc_type"))
 
     @app.put("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def put_golden(bundle_id: str, doc_id: str, request: Request):
         body = await json_body(request)
-        return call(B.save_golden, data_dir, bundle_id, doc_id, body.get("golden"))
+        return await run_in_threadpool(call, B.save_golden, data_dir, bundle_id, doc_id, body.get("golden"))
 
     @app.delete("/api/bundles/{bundle_id}/docs/{doc_id}/golden", status_code=204)
     def delete_golden(bundle_id: str, doc_id: str):
@@ -154,14 +154,14 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     @app.put("/api/bundles/{bundle_id}/docs/{doc_id}/review", status_code=204)
     async def put_review(bundle_id: str, doc_id: str, request: Request):
         body = await json_body(request)
-        call(B.set_review, data_dir, bundle_id, doc_id, body.get("review", ""))
+        await run_in_threadpool(call, B.set_review, data_dir, bundle_id, doc_id, body.get("review", ""))
         return Response(status_code=204)
 
     @app.put("/api/bundles/{bundle_id}/enabled")
     async def put_enabled(bundle_id: str, request: Request):
         body = await json_body(request)
-        call(B.set_enabled, data_dir, bundle_id, body.get("ids"), body.get("enabled"))
-        return call(B.bundle_view, data_dir, bundle_id)
+        await run_in_threadpool(call, B.set_enabled, data_dir, bundle_id, body.get("ids"), body.get("enabled"))
+        return await run_in_threadpool(call, B.bundle_view, data_dir, bundle_id)
 
     def _export_name(bundle_id: str, doc: Optional[str], scope: str, ext: str) -> str:
         suffix = f"-{doc}" if doc else ("-disabled" if scope == "disabled" else "")
