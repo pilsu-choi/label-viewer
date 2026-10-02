@@ -38,7 +38,7 @@ export function renderDetail(root, bundleId, docId) {
   api.getBundle(bundleId).then((b) => { if (destroyed) return; bundle = b; if (documentRail) documentRail.update(bundle.docs, docId); }).catch(() => {});
   api.getDoc(bundleId, docId).then((d) => {
     if (destroyed) return;
-    doc = d; state.view = doc.has.original ? 'original' : 'preprocessed'; build();
+    doc = d; state.view = doc.has.preprocessed ? 'preprocessed' : 'original'; build();
   }).catch((e) => {
     if (destroyed) return;
     mount(root, el('div', { class: 'error-block' }, `문서를 불러오지 못했습니다: ${e.message}`));

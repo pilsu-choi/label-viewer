@@ -166,3 +166,6 @@ status: active
 
 ### Update
 - [원장 명칭(master_reference) 상시 표시](2026-10-02-master-reference-view.md): 명칭 셀은 evidence가 없어 보조줄이 안 나오던 한계를 `feat/name-row-master-ref`에서 보완(더미 샘플 master_reference 위치 변경 포함).
+
+### Creation
+- [이미지 기본 보기를 전처리로](2026-10-02-default-preprocessed-view.md): 상세 뷰어·목록 썸네일이 전처리 이미지를 먼저 보여 주고 없으면 원본을 쓰게 함(2026-10-02, `feat/default-preprocessed-view`).
