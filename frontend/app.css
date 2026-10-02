@@ -750,6 +750,7 @@ select.fr-dtype {
 .cmp-key { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .cmp-row { flex: none; margin-right: 6px; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; }
 .cmp-val { overflow-wrap: break-word; }
+.cmp-master-ref { margin-top: 2px; font-size: var(--fs-xs); color: var(--ink-3); overflow-wrap: anywhere; }
 .cmp-cell { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--sp-2); }
 /* 상태 배지는 가장 긴 라벨(형식오류) 폭으로 고정해 열마다 같은 위치에 둔다 */
 .cmp-cell > .badge { width: 5em; padding: 0 4px; justify-content: center; }

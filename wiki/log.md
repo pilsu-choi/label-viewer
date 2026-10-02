@@ -11,6 +11,12 @@ status: active
 브랜치: `fix/ao-upload-raw`
 워크트리: `.worktrees/ao-upload-fix`
 
+## 2026-10-02
+
+### Creation
+
+- [원장 명칭(master_reference) 상시 표시](2026-10-02-master-reference-view.md): Harness 값 셀 보조줄과 팝오버 마스터 대조 영역에 원장 명칭·후보 코드 표시.
+
 ## 2026-09-29
 
 ### Creation
