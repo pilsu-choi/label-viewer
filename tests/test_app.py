@@ -492,7 +492,9 @@ def _typed_bundle(client: TestClient) -> str:
 def test_canon_and_apply_template():
     assert canon("Y000701333") == "소견서" and canon(" 입원확인서 ") == "입퇴원확인서"
     assert canon("모름") == canon("") == canon(None) == ""
-    assert label("AC02922011") == "진료비영수증 (AC02922011)" and label("세부내역서") == "세부내역서" and label(None) == ""
+    assert label("AC02922011") == label("진료비영수증") == "진료비영수증" and label("약제영수증") == label("Y000707300") == "약제비영수증"
+    assert label("입원확인서") == "입퇴원확인서" and label("모름") == "모름" and label(None) == ""
+    assert label("AC02922011", code=True) == "진료비영수증 (AC02922011)" and label("세부내역서", code=True) == "세부내역서"
     doc = {"extracted_fields": [{"key": "발행일", "value": "2024"}], "extracted_groups": [
         {"key": "환자정보", "fields": [{"key": "환자정보-성명", "value": "홍"}]}], "extracted_tables": [
         {"key": "항목내역", "headers": ["a"], "rows": [[{"key": "항목", "value": "주사"}, {"key": "zzz", "value": "1"}]]}]}
@@ -531,7 +533,10 @@ def test_classification_grading(client: TestClient):
     assert docs["NOGOLD"]["classification"] == {"ao": None, "harness": None}
     bad = client.get(f"/api/bundles/{bid}/docs/BAD").json()
     assert bad["classification"] == {"ao": False, "harness": True}
-    assert bad["doc_type_by_source"] == {"golden": "세부내역서", "ao": "진료비영수증 (AC02922011)", "harness": "진료비세부산정내역서"}
+    assert bad["doc_type_by_source"] == {"golden": "세부내역서", "ao": "진료비영수증 (AC02922011)", "harness": "세부내역서"}
+    # 목록·필터의 문서 유형은 표기(코드·이름·별칭)와 관계없이 표준 이름 하나로 묶인다
+    assert {d["doc_type"] for d in docs.values()} == {"진료비영수증", "세부내역서"}
+    assert docs["NOGOLD"]["doc_type"] == docs["OK"]["doc_type"] == bad["doc_type_by_source"]["ao"].split(" ")[0]
     summ = client.get(f"/api/bundles/{bid}").json()["summary"]
     assert summ["classification"]["ao"] == {"correct": 1, "total": 2, "accuracy": 0.5}
     assert summ["classification"]["harness"]["accuracy"] == 1.0

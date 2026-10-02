@@ -8,6 +8,8 @@ import re
 import unicodedata
 from typing import Any
 
+from .doctype import canon
+
 STATUSES = ("MATCH", "MISMATCH", "MISSING", "EXTRA", "TYPE_MISMATCH")
 _EMPTY_TOKENS = {"", "-", "null", "none", "[]"}
 _NUM_RE = re.compile(r"-?\d+(\.\d+)?")
@@ -213,7 +215,7 @@ def compare_doc(doc_i: int, gdoc: dict | None, adoc: dict | None, hdoc: dict | N
     ai = DocIndex(adoc, is_harness=False)
     hi = DocIndex(hdoc, is_harness=True)
     ui_boxes = _ui_bbox_index(ui_doc)
-    make_row = partial(_row, receipt=base.get("doc_type") == "진료비영수증")
+    make_row = partial(_row, receipt=canon(base.get("doc_type")) == "진료비영수증")
     rows: list[dict] = []
     consumed_a: set[int] = set()
     consumed_h: set[int] = set()

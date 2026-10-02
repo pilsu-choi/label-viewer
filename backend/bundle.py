@@ -491,7 +491,7 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
         "doc_type_suggest": _doc_type_suggest(parsed),
         "doc_types": DOC_TYPES,
         "classification": _classification(parsed),
-        "doc_type_by_source": {k: label(_doc_type_of(parsed[j])) for k, j in
+        "doc_type_by_source": {k: label(_doc_type_of(parsed[j]), code=True) for k, j in
                                (("golden", "golden"), ("ao", "ao_extract"), ("harness", "harness"))},
         "pages": {
             "original": page_count(paths["original"]) if paths["original"] else 0,

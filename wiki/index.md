@@ -13,6 +13,7 @@ status: active
 
 ## 문서
 
+- [2026-10-02 같은 문서 유형이 표기에 따라 다른 유형으로 나뉘던 문제 수정](2026-10-02-doc-type-canon.md)
 - [2026-10-02 원장 명칭(master_reference) 상시 표시](2026-10-02-master-reference-view.md)
 - [2026-10-02 명칭 행 원장 명칭 표시·팝오버 화면 맞춤](2026-10-02-name-row-master-ref.md)
 - [2026-10-02 이미지 기본 보기를 전처리로](2026-10-02-default-preprocessed-view.md)
