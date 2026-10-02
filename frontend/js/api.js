@@ -39,12 +39,12 @@ export const api = {
     `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/raw/${kind}`,
   getRaw: (bundleId, docId, kind) => fetch(`/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/raw/${kind}`)
     .then((res) => { if (!res.ok) throw new Error(`${res.status}`); return res.text(); }),
-  createGolden: (bundleId, docId, from, docType) =>
-    req('POST', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`, { from, doc_type: docType || undefined }),
-  putGolden: (bundleId, docId, golden) =>
-    req('PUT', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`, { golden }),
-  deleteGolden: (bundleId, docId) =>
-    req('DELETE', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`),
+  createGolden: (bundleId, docId, from, docType, expectedRevision) =>
+    req('POST', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`, { from, doc_type: docType || undefined, expected_revision: expectedRevision }),
+  putGolden: (bundleId, docId, golden, expectedRevision) =>
+    req('PUT', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden`, { golden, expected_revision: expectedRevision }),
+  deleteGolden: (bundleId, docId, expectedRevision) =>
+    req('DELETE', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden${expectedRevision === undefined ? "" : `?expected_revision=${encodeURIComponent(expectedRevision)}`}`),
   // 여러 문서 활성 여부를 바꾸고 갱신된 번들 화면 데이터를 받는다. 문서 이동용 캐시도 바꿔 둔다.
   setEnabled(bundleId, ids, enabled) {
     const p = req('PUT', `/api/bundles/${encodeURIComponent(bundleId)}/enabled`, { ids, enabled });
@@ -57,6 +57,17 @@ export const api = {
     `/api/bundles/${encodeURIComponent(bundleId)}/export/bundle.zip?${docId ? `doc=${encodeURIComponent(docId)}` : `scope=${scope}`}`,
   exportGoldenXlsxUrl: (bundleId, docId, scope = 'enabled') =>
     `/api/bundles/${encodeURIComponent(bundleId)}/export/golden.xlsx?${docId ? `doc=${encodeURIComponent(docId)}` : `scope=${scope}`}`,
+
+  getGoldenHistory: (bundleId, docId, options = {}) =>
+    req('GET', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden/history?${new URLSearchParams(Object.entries(options).filter(([, value]) => value != null))}`),
+  getGoldenHistoryVersion: (bundleId, docId, historyId) =>
+    req('GET', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden/history/${encodeURIComponent(historyId)}`),
+  restoreGolden: (bundleId, docId, historyId, expectedRevision) =>
+    req('POST', `/api/bundles/${encodeURIComponent(bundleId)}/docs/${encodeURIComponent(docId)}/golden/history/${encodeURIComponent(historyId)}/restore`, { expected_revision: expectedRevision }),
+  startExport: (bundleId, options) => req('POST', `/api/bundles/${encodeURIComponent(bundleId)}/exports`, options),
+  getExport: (bundleId, jobId) => req('GET', `/api/bundles/${encodeURIComponent(bundleId)}/exports/${encodeURIComponent(jobId)}`),
+  cancelExport: (bundleId, jobId) => req('DELETE', `/api/bundles/${encodeURIComponent(bundleId)}/exports/${encodeURIComponent(jobId)}`),
+  exportDownloadUrl: (bundleId, jobId) => `/api/bundles/${encodeURIComponent(bundleId)}/exports/${encodeURIComponent(jobId)}/download`,
 
   uploadBundle(files, name, onProgress) {
     return new Promise((resolve, reject) => {

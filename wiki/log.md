@@ -179,3 +179,6 @@ status: active
 
 ### Creation
 - [엑셀 내보내기·잠재 오류 수정과 전체 번들 목록](2026-10-03-export-audit-bundle-list.md): 엑셀 반복 탐색 병목, 자동 저장 경쟁, Golden 입력·경로 검증, ZIP 확장 크기를 보완하고 전체 번들 검색 화면 추가(2026-10-03, `fix/excel-export`).
+
+### Creation
+- [내보내기 진행률·선택 문서와 Golden 이력·충돌 감지](2026-10-03-review-tools.md): 추천 기능을 병렬로 구현하고 다중 워커 상태 공유·취소·선택·이력·복원·충돌을 검증(2026-10-03, `feat/review-tools`).

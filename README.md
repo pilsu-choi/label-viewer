@@ -14,6 +14,14 @@ pip install -r requirements-dev.txt && python3 -m pytest tests -q
 
 환경변수: `LABEL_VIEWER_DATA`(데이터 경로, 기본 `./storage`), `LABEL_VIEWER_MAX_UPLOAD_MB`(기본 2048), `LABEL_VIEWER_WORKERS`(uvicorn 워커 수, 기본 2 — `--workers`로도 지정).
 
+## 내보내기와 Golden 복원
+
+목록의 `내보내기`에서 활성·비활성 목록 또는 선택 문서만 Excel/ZIP으로 받을 수 있다. 체크박스 선택은 페이지와 필터를 넘어 유지되며 `결과 전체 선택`으로 현재 검색 결과를 선택할 수 있다. 화면 아래 작업 패널은 처리 문서 수와 경과 시간을 표시하고 취소·실패 메시지·다운로드 재시도를 제공한다. 화면을 이동해도 진행 중 작업 패널은 유지된다.
+
+Golden 편집 패널의 `버전 기록`에서 저장·삭제·복원 이력을 확인하고 이전 내용을 복원한다. 미저장 변경이 있으면 저장 후 복원 또는 변경을 버리고 복원을 선택한다. 다른 탭에서 먼저 저장했다면 자동 저장을 멈추고 충돌을 알린다. 내 변경을 JSON으로 내려받은 뒤 서버의 최신 내용을 불러올 수 있다. 기존 문서는 첫 변경부터 이력을 남기며, 번들을 삭제하면 이력도 삭제된다.
+
+선택 문서 내보내기와 Golden 복원 API는 [API.md](API.md)의 내보내기 작업·Golden 이력 항목을 참고한다. 선택 사항인 브라우저 회귀 검사는 Playwright와 Chromium을 설치한 환경에서 `python scripts/verify_editor_save.py`, `python scripts/verify_golden_history.py`, `python scripts/verify_export_ui.py`로 실행한다.
+
 ## 테스트용 더미 번들
 
 ```bash

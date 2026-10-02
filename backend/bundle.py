@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -20,6 +21,7 @@ from PIL import Image, ImageSequence
 
 from .compare import compare_bundle, harness_value, score
 from .doctype import DOC_TYPES, apply_template, canon, classified, label
+from .golden_history import archive_snapshot, golden_revision, list_snapshots, read_snapshot
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 JSON_KINDS = ("ao_extract", "harness", "golden", "ao_ui")
@@ -338,11 +340,21 @@ def load_json_safe(path: Path | None, canonical: bool = False) -> tuple[dict | N
 
 def _load_json(path: Path, canonical: bool) -> tuple[dict | None, str | None]:
     try:
-        data = json.loads(read_json_text(path))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        return None, f"JSON parse error: {e}"
+        raw = path.read_bytes()
     except OSError as e:
         return None, f"read error: {e}"
+    return _load_json_bytes(raw, canonical)
+
+
+def _load_json_bytes(raw: bytes, canonical: bool) -> tuple[dict | None, str | None]:
+    try:
+        try:
+            source = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            source = raw.decode("cp949")
+        data = json.loads(source)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        return None, f"JSON parse error: {e}"
     docs = data.get("documents", []) if isinstance(data, dict) else None
     if not isinstance(docs, list) or not all(isinstance(d, dict) for d in docs):
         return None, "JSON 형식 오류: 최상위 객체와 documents 객체 목록이 필요합니다"
@@ -480,7 +492,7 @@ def _doc_type_suggest(parsed: dict) -> str:
     return ""
 
 
-def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
+def _doc_detail_unlocked(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     _safe_id(doc_id, "doc_id")
     bdir = bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
@@ -492,11 +504,14 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     paths = {k: find_kind_file(bdir, k, doc_id) for k in DOC_KINDS}
     has = {k: paths[k] is not None for k in DOC_KINDS}
     has["ao_ui"] = find_kind_file(bdir, "ao_ui", doc_id) is not None
+    golden_raw = paths["golden"].read_bytes() if paths["golden"] else None
 
     errors = []
     parsed: dict[str, dict | None] = {}
     for k in CORE_JSON_KINDS:
-        data, err = load_doc_json(paths[k])
+        data, err = (_load_json_bytes(golden_raw, True) if k == "golden" and golden_raw is not None
+                     else (None, None) if k == "golden"
+                     else load_doc_json(paths[k]))
         parsed[k] = data
         if err:
             errors.append(f"{k}: {err}")
@@ -510,6 +525,7 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     idx = ids_sorted.index(doc_id)
     return {
         "id": doc_id,
+        "golden_revision": golden_revision(golden_raw),
         "has": has,
         "errors": errors,
         "review": (state.get("review") or {}).get(doc_id, ""),
@@ -532,6 +548,17 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
         "prev": ids_sorted[idx - 1] if idx > 0 else None,
         "next": ids_sorted[idx + 1] if idx < len(ids_sorted) - 1 else None,
     }
+
+
+def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
+    """Read Golden bytes and parsed content under a shared lock for a coherent revision."""
+    bdir = bundle_dir(data_dir, bundle_id)
+    if not bdir.is_dir():
+        raise ApiError(404, "bundle not found")
+    _safe_id(doc_id, "doc_id")
+    with _golden_lock(bdir, doc_id) as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        return _doc_detail_unlocked(data_dir, bundle_id, doc_id)
 
 
 def _doc_summary(bdir: Path, doc_id: str, rv: str) -> dict:
@@ -711,6 +738,10 @@ def golden_path(bdir: Path, doc_id: str) -> Path:
     return bdir / "golden" / f"{doc_id}.json"
 
 
+def _current_golden_path(bdir: Path, doc_id: str) -> Path:
+    return find_kind_file(bdir, "golden", doc_id) or golden_path(bdir, doc_id)
+
+
 def _require_doc(bdir: Path, doc_id: str) -> None:
     if not bdir.is_dir():
         raise ApiError(404, "bundle not found")
@@ -718,40 +749,75 @@ def _require_doc(bdir: Path, doc_id: str) -> None:
         raise ApiError(404, "document not found")
 
 
-def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_type: str | None = None) -> dict:
+def _require_history_doc(bdir: Path, doc_id: str) -> None:
+    """A golden-only document can disappear from doc_ids after deletion; its history remains addressable."""
+    if not bdir.is_dir():
+        raise ApiError(404, "bundle not found")
+    if doc_id not in doc_ids(bdir) and not list_snapshots(bdir, doc_id, limit=1):
+        raise ApiError(404, "document not found")
+
+
+def _golden_lock(bdir: Path, doc_id: str):
+    lock_name = hashlib.sha256(doc_id.encode("utf-8")).hexdigest()
+    return open(bdir / f".golden-{lock_name}.lock", "a")
+
+
+def _check_golden_revision(raw: bytes | None, expected_revision: str | None) -> None:
+    if expected_revision is not None and expected_revision != golden_revision(raw):
+        raise ApiError(409, "golden revision conflict")
+
+
+def _archive_baseline_if_needed(bdir: Path, doc_id: str, raw: bytes | None) -> None:
+    if not list_snapshots(bdir, doc_id, limit=1):
+        archive_snapshot(bdir, doc_id, raw, "baseline")
+
+
+def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_type: str | None = None,
+                  expected_revision: str | None = None) -> dict:
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
-    gpath = golden_path(bdir, doc_id)
-    if gpath.exists():
-        raise ApiError(409, "golden already exists")
-    if source == "empty":
-        data = copy.deepcopy(EMPTY_GOLDEN)
-    elif source == "ao":
-        apath = find_kind_file(bdir, "ao_extract", doc_id)
-        data, err = load_doc_json(apath)
-        if data is None:
-            raise ApiError(404, f"ao_extract not available: {err or 'missing'}")
-        data = copy.deepcopy(data)
-    elif source == "harness":
-        hpath = find_kind_file(bdir, "harness", doc_id)
-        hdata, err = load_doc_json(hpath)
-        if hdata is None:
-            raise ApiError(404, f"harness not available: {err or 'missing'}")
-        data = _from_harness(hdata)
-    else:
-        raise ApiError(422, f"invalid source: {source}")
-    name = canon(doc_type)
-    if name:
-        docs = data.setdefault("documents", [])
-        if not docs:
-            docs.append(copy.deepcopy(EMPTY_GOLDEN["documents"][0]))
-        if canon(docs[0].get("doc_type")) != name:
-            docs[0] = apply_template(docs[0], name)
+    gpath = _current_golden_path(bdir, doc_id)
+    with _golden_lock(bdir, doc_id) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        before = gpath.read_bytes() if gpath.exists() else None
+        _check_golden_revision(before, expected_revision)
+        if before is not None:
+            raise ApiError(409, "golden already exists")
+        if source == "empty":
+            data = copy.deepcopy(EMPTY_GOLDEN)
+        elif source == "ao":
+            apath = find_kind_file(bdir, "ao_extract", doc_id)
+            data, err = load_doc_json(apath)
+            if data is None:
+                raise ApiError(404, f"ao_extract not available: {err or 'missing'}")
+            data = copy.deepcopy(data)
+        elif source == "harness":
+            hpath = find_kind_file(bdir, "harness", doc_id)
+            hdata, err = load_doc_json(hpath)
+            if hdata is None:
+                raise ApiError(404, f"harness not available: {err or 'missing'}")
+            data = _from_harness(hdata)
         else:
-            docs[0]["doc_type"] = name
-    _atomic_write_json(gpath, data)
-    return doc_detail(data_dir, bundle_id, doc_id)
+            raise ApiError(422, f"invalid source: {source}")
+        name = canon(doc_type)
+        if name:
+            docs = data.setdefault("documents", [])
+            if not docs:
+                docs.append(copy.deepcopy(EMPTY_GOLDEN["documents"][0]))
+            if canon(docs[0].get("doc_type")) != name:
+                docs[0] = apply_template(docs[0], name)
+            else:
+                docs[0]["doc_type"] = name
+        _archive_baseline_if_needed(bdir, doc_id, before)
+        _atomic_write_json(gpath, data)
+        try:
+            archive_snapshot(bdir, doc_id, gpath.read_bytes(), "create")
+        except Exception:
+            gpath.unlink(missing_ok=True)
+            raise
+        result = _doc_detail_unlocked(data_dir, bundle_id, doc_id)
+    return result
 
 
 def _validate_golden(data: Any, set_defaults: bool = True) -> None:
@@ -802,22 +868,120 @@ def _validate_golden(data: Any, set_defaults: bool = True) -> None:
                     validate_cell(cell, f"extracted_tables[{i}].rows[{j}][{k}]")
 
 
-def save_golden(data_dir: Path, bundle_id: str, doc_id: str, data: Any) -> dict:
+def save_golden(data_dir: Path, bundle_id: str, doc_id: str, data: Any,
+                expected_revision: str | None = None) -> dict:
     _validate_golden(data)
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
-    _atomic_write_json(golden_path(bdir, doc_id), data)
-    return doc_detail(data_dir, bundle_id, doc_id)
+    p = _current_golden_path(bdir, doc_id)
+    with _golden_lock(bdir, doc_id) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        before = p.read_bytes() if p.exists() else None
+        _check_golden_revision(before, expected_revision)
+        _archive_baseline_if_needed(bdir, doc_id, before)
+        _atomic_write_json(p, data)
+        try:
+            archive_snapshot(bdir, doc_id, p.read_bytes(), "save")
+        except Exception:
+            if before is None:
+                p.unlink(missing_ok=True)
+            else:
+                _atomic_write_bytes(p, before)
+            raise
+        result = _doc_detail_unlocked(data_dir, bundle_id, doc_id)
+    return result
 
 
-def delete_golden(data_dir: Path, bundle_id: str, doc_id: str) -> None:
+def delete_golden(data_dir: Path, bundle_id: str, doc_id: str,
+                  expected_revision: str | None = None) -> None:
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
-    p = golden_path(bdir, doc_id)
-    if p.exists():
-        p.unlink()
+    p = _current_golden_path(bdir, doc_id)
+    with _golden_lock(bdir, doc_id) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        before = p.read_bytes() if p.exists() else None
+        _check_golden_revision(before, expected_revision)
+        if before is not None:
+            _archive_baseline_if_needed(bdir, doc_id, before)
+            p.unlink()
+            try:
+                archive_snapshot(bdir, doc_id, None, "delete")
+            except Exception:
+                _atomic_write_bytes(p, before)
+                raise
+
+
+def list_golden_history(data_dir: Path, bundle_id: str, doc_id: str, limit: int = 100,
+                        before: str | None = None) -> dict:
+    bdir = bundle_dir(data_dir, bundle_id)
+    _safe_id(doc_id, "doc_id")
+    _require_history_doc(bdir, doc_id)
+    with _golden_lock(bdir, doc_id) as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH)
+        items = list_snapshots(bdir, doc_id, limit, before)
+        current_path = _current_golden_path(bdir, doc_id)
+        raw = current_path.read_bytes() if current_path.exists() else None
+    return {"items": items, "next_cursor": items[-1]["id"] if len(items) == max(1, min(int(limit), 500)) else None,
+            "golden_revision": golden_revision(raw)}
+
+
+def get_golden_history(data_dir: Path, bundle_id: str, doc_id: str, history_id: str) -> dict:
+    bdir = bundle_dir(data_dir, bundle_id)
+    _safe_id(doc_id, "doc_id")
+    _require_history_doc(bdir, doc_id)
+    snapshot = read_snapshot(bdir, doc_id, history_id)
+    if snapshot is None:
+        raise ApiError(404, "golden history entry not found")
+    metadata, raw = snapshot
+    if raw is None:
+        golden = None
+    else:
+        golden, err = _load_json_bytes(raw, True)
+        if golden is None:
+            raise ApiError(422, f"golden history snapshot is invalid: {err or 'invalid JSON'}")
+    return {**metadata, "golden": golden}
+
+
+def restore_golden(data_dir: Path, bundle_id: str, doc_id: str, history_id: str,
+                   expected_revision: str) -> dict:
+    bdir = bundle_dir(data_dir, bundle_id)
+    _safe_id(doc_id, "doc_id")
+    _require_history_doc(bdir, doc_id)
+    snapshot = read_snapshot(bdir, doc_id, history_id)
+    if snapshot is None:
+        raise ApiError(404, "golden history entry not found")
+    _, restore_raw = snapshot
+    if restore_raw is not None:
+        restored_data, err = _load_json_bytes(restore_raw, True)
+        if restored_data is None:
+            raise ApiError(422, f"golden history snapshot is invalid: {err or 'invalid JSON'}")
+    p = _current_golden_path(bdir, doc_id)
+    with _golden_lock(bdir, doc_id) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        before = p.read_bytes() if p.exists() else None
+        _check_golden_revision(before, expected_revision)
+        _archive_baseline_if_needed(bdir, doc_id, before)
+        if restore_raw is None:
+            p.unlink(missing_ok=True)
+        else:
+            _atomic_write_bytes(p, restore_raw)
+        try:
+            archive_snapshot(bdir, doc_id, restore_raw, "restore")
+        except Exception:
+            if before is None:
+                p.unlink(missing_ok=True)
+            else:
+                _atomic_write_bytes(p, before)
+            raise
+        if doc_id in doc_ids(bdir):
+            result = _doc_detail_unlocked(data_dir, bundle_id, doc_id)
+        else:
+            result = {"id": doc_id, "golden_revision": golden_revision(None),
+                      "has": {kind: False for kind in (*DOC_KINDS, "ao_ui")},
+                      "golden": None}
+    return result
 
 
 def set_review(data_dir: Path, bundle_id: str, doc_id: str, review: str) -> None:

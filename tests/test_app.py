@@ -722,3 +722,67 @@ def test_export_xlsx_keeps_ocr_text_literal(client: TestClient, bundle: dict):
 def test_export_unknown_doc_returns_404(client: TestClient, bundle: dict, ext):
     response = client.get(f"/api/bundles/{bundle['id']}/export/{ext}", params={"doc": "unknown"})
     assert response.status_code == 404
+
+
+def test_export_job_api_selected_documents(client: TestClient, bundle: dict):
+    import time
+    bid = bundle['id']
+    selected = bundle['docs'][0]['id']
+    client.put(f'/api/bundles/{bid}/enabled', json={'ids': [selected], 'enabled': False})
+    for format in ('xlsx', 'zip'):
+        response = client.post(f'/api/bundles/{bid}/exports', json={'format': format, 'ids': [selected]})
+        assert response.status_code == 202, response.text
+        job = response.json()
+        deadline = time.monotonic() + 10
+        while job['state'] in ('queued', 'running') and time.monotonic() < deadline:
+            time.sleep(0.02)
+            job = client.get(f'/api/bundles/{bid}/exports/{job["id"]}').json()
+        assert job['state'] == 'ready', job
+        assert job['completed'] == job['total'] == 1
+        download = client.get(f'/api/bundles/{bid}/exports/{job["id"]}/download')
+        assert download.status_code == 200
+        if format == 'xlsx':
+            workbook = load_workbook(io.BytesIO(download.content))
+            assert workbook['요약']['A2'].value == selected
+            assert workbook['요약'].max_row == 3
+        else:
+            with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+                assert archive.namelist()
+                assert all(Path(name).stem == selected for name in archive.namelist())
+        cancelled = client.delete(f'/api/bundles/{bid}/exports/{job["id"]}')
+        assert cancelled.status_code == 200
+        assert cancelled.json()['state'] == 'cancelled'
+        assert client.get(f'/api/bundles/{bid}/exports/{job["id"]}/download').status_code == 409
+    assert client.post(f'/api/bundles/{bid}/exports', json={'format':'xlsx','ids':[]}).status_code == 422
+    assert client.post(f'/api/bundles/{bid}/exports', json={'format':'xlsx','ids':['unknown']}).status_code == 404
+
+
+def test_golden_history_and_conflict_api(client: TestClient, bundle: dict):
+    bid = bundle['id']
+    did = bundle['docs'][0]['id']
+    path = f'/api/bundles/{bid}/docs/{did}'
+    initial = client.get(path).json()
+    import copy
+    golden = copy.deepcopy(initial['golden'])
+    golden['documents'][0]['extracted_fields'][0]['value'] = 'history regression'
+    response = client.put(path + '/golden', json={'golden': golden, 'expected_revision': initial['golden_revision']})
+    assert response.status_code == 200, response.text
+    updated = response.json()
+    stale = client.put(path + '/golden', json={'golden': golden, 'expected_revision': initial['golden_revision']})
+    assert stale.status_code == 409
+    stale_delete = client.delete(path + '/golden', params={'expected_revision':initial['golden_revision']})
+    assert stale_delete.status_code == 409
+    history = client.get(path + '/golden/history').json()
+    baseline = next(item for item in history['items'] if item['action'] == 'baseline')
+    snapshot = client.get(path + '/golden/history/' + baseline['id'])
+    assert snapshot.status_code == 200
+    assert snapshot.json()['golden'] == initial['golden']
+    restored = client.post(path + '/golden/history/' + baseline['id'] + '/restore', json={'expected_revision':updated['golden_revision']})
+    assert restored.status_code == 200, restored.text
+    assert restored.json()['golden_revision'] == initial['golden_revision']
+    assert client.post(path + '/golden/history/' + baseline['id'] + '/restore', json={}).status_code == 422
+    page = client.get(path + '/golden/history', params={'limit':1}).json()
+    assert len(page['items']) == 1
+    assert page['next_cursor']
+    older = client.get(path + '/golden/history',params={'before':page['next_cursor']}).json()
+    assert all(item['id'] < page['next_cursor'] for item in older['items'])
