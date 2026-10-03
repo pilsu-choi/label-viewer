@@ -225,3 +225,128 @@ def test_deleting_bundle_during_export_does_not_recreate_job_row(pg_data_dir, mo
     with DB.connection() as conn:
         assert conn.execute("SELECT count(*) FROM export_jobs WHERE namespace=%s AND bundle_id=%s AND id=%s",
                             (DB.namespace(pg_data_dir), bundle_id, started["id"])).fetchone()[0] == 0
+
+
+def test_shutdown_cancels_and_joins_owned_export_workers(pg_data_dir, monkeypatch):
+    entered = Event()
+
+    def cooperative_export(_data_dir, _bundle_id, **kwargs):
+        entered.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if kwargs["cancel_check"]():
+                raise E.ExportCancelled("cancelled")
+            time.sleep(0.01)
+        pytest.fail("shutdown did not make cancellation visible")
+
+    bundle_id = _make_bundle(pg_data_dir)
+    monkeypatch.setattr(J.E, "export_bundle_zip", cooperative_export)
+    started = J.start(pg_data_dir, bundle_id, "zip")
+    assert entered.wait(5)
+
+    J.shutdown(pg_data_dir)
+
+    assert J.status(pg_data_dir, bundle_id, started["id"])["state"] == "cancelled"
+    assert not any(t.name == f"export-{started['id']}" for t in enumerate_threads())
+    with pytest.raises(ApiError) as error:
+        J.start(pg_data_dir, bundle_id, "zip")
+    assert error.value.status == 503
+    J.startup(pg_data_dir)
+    monkeypatch.setattr(J.E, "export_bundle_zip", lambda *_args, **_kwargs: None)
+    restarted = J.start(pg_data_dir, bundle_id, "zip")
+    assert _wait_state(pg_data_dir, bundle_id, restarted["id"], "ready")["state"] == "ready"
+
+
+def test_fast_many_document_progress_coalesces_database_updates(pg_data_dir, monkeypatch):
+    bundle_id = _make_bundle(pg_data_dir, ids=tuple(f"D{i:03}" for i in range(200)))
+    progress_writes = []
+    original_update = J._update_progress
+
+    def count_progress(job_dir, completed, total, phase):
+        progress_writes.append((completed, total, phase))
+        return original_update(job_dir, completed, total, phase)
+
+    def fast_export(_data_dir, _bundle_id, **kwargs):
+        ids = kwargs["ids"]
+        total = len(ids)
+        kwargs["progress"](0, total, "preparing")
+        for completed in range(1, total + 1):
+            kwargs["progress"](completed, total, "writing")
+        kwargs["progress"](total, total, "finalizing")
+
+    monkeypatch.setattr(J, "_update_progress", count_progress)
+    monkeypatch.setattr(J.E, "export_bundle_zip", fast_export)
+    started = J.start(pg_data_dir, bundle_id, "zip")
+    state = _wait_state(pg_data_dir, bundle_id, started["id"], "ready")
+
+    assert state["completed"] == state["total"] == 200
+    assert progress_writes[0] == (0, 200, "preparing")
+    assert progress_writes[-1] == (200, 200, "finalizing")
+    assert len(progress_writes) <= 3
+
+
+def test_xlsx_reads_bundle_review_state_once_for_200_documents(pg_data_dir, monkeypatch):
+    bundle_id = _make_bundle(pg_data_dir, ids=tuple(f"D{i:03}" for i in range(200)))
+    state_reads = []
+    original_load_state = B.load_state
+
+    def counted_load_state(bdir):
+        state_reads.append(bdir)
+        return original_load_state(bdir)
+
+    monkeypatch.setattr(B, "load_state", counted_load_state)
+    result = E.export_golden_xlsx(pg_data_dir, bundle_id)
+
+    assert result and result.startswith(b"PK")
+    assert len(state_reads) == 1
+
+
+def test_ttl_cleanup_removes_old_job_files_without_database_rows(pg_data_dir):
+    bundle_id = _make_bundle(pg_data_dir)
+    stale = J._bundle_job_root(pg_data_dir, bundle_id) / "orphaned-job"
+    stale.mkdir(parents=True)
+    marker = stale / "artifact.part"
+    marker.write_bytes(b"partial")
+    old = time.time() - J._JOB_TTL_SECONDS - 5
+    os.utime(marker, (old, old))
+
+    J._cleanup_expired(J._root(pg_data_dir), pg_data_dir)
+
+    assert not stale.exists()
+
+
+def test_lost_heartbeat_lease_stops_worker_before_publish(pg_data_dir, monkeypatch):
+    entered = Event()
+    monkeypatch.setattr(J, "_LEASE_SECONDS", 0.15)
+    monkeypatch.setattr(J, "_HEARTBEAT_SECONDS", 0.02)
+
+    def wait_for_lease_loss(_data_dir, _bundle_id, **kwargs):
+        entered.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if kwargs["cancel_check"]():
+                raise E.ExportCancelled("lease lost")
+            time.sleep(0.01)
+        pytest.fail("heartbeat loss did not stop exporter")
+
+    bundle_id = _make_bundle(pg_data_dir)
+    monkeypatch.setattr(J.E, "export_bundle_zip", wait_for_lease_loss)
+    started = J.start(pg_data_dir, bundle_id, "zip")
+    assert entered.wait(5)
+
+    original_pool = DB._pool_for_current_process
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("temporary database outage")
+
+    monkeypatch.setattr(DB, "_pool_for_current_process", unavailable)
+    deadline = time.monotonic() + 5
+    thread_name = f"export-{started['id']}"
+    while time.monotonic() < deadline and any(t.name == thread_name for t in enumerate_threads()):
+        time.sleep(0.02)
+    monkeypatch.setattr(DB, "_pool_for_current_process", original_pool)
+
+    assert not any(t.name == thread_name for t in enumerate_threads())
+    state = J.status(pg_data_dir, bundle_id, started["id"])
+    assert state["state"] == "failed"
+    assert not list(J._job_dir(pg_data_dir, bundle_id, started["id"]).glob("artifact.*"))

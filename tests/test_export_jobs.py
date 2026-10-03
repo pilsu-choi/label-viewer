@@ -67,6 +67,25 @@ def test_zip_job_selection_ignores_scope_and_preserves_natural_order(tmp_path):
                      "original/D10.png", "ao_extract/D10.json", "golden/D10.json"]
 
 
+def test_xlsx_export_skips_page_count_work_but_doc_detail_keeps_it(tmp_path, monkeypatch):
+    bundle_id = _make_bundle(tmp_path, ids=("D1",))
+    calls = []
+
+    def page_count(path):
+        calls.append(path)
+        return 3
+
+    monkeypatch.setattr(E.B, "page_count", page_count)
+    detail = E.B.doc_detail(tmp_path, bundle_id, "D1")
+    assert detail["pages"] == {"original": 3, "preprocessed": 0}
+    assert len(calls) == 1
+
+    calls.clear()
+    artifact = E.export_golden_xlsx(tmp_path, bundle_id)
+    assert artifact[:2] == b"PK"
+    assert calls == []
+
+
 def test_job_state_and_result_are_visible_in_another_process(tmp_path):
     bundle_id = _make_bundle(tmp_path, ids=("D1",))
     queued = J.start(tmp_path, bundle_id, "xlsx")
@@ -150,7 +169,7 @@ def test_cancel_running_job_removes_partial_artifact(tmp_path, monkeypatch):
     assert error.value.status == 409
 
 
-def test_cancel_ready_job_removes_artifact_and_prevents_download(tmp_path):
+def test_cancel_ready_job_keeps_handed_off_artifact_but_prevents_new_download(tmp_path):
     bundle_id = _make_bundle(tmp_path, ids=("D1",))
     queued = J.start(tmp_path, bundle_id, "zip")
     _wait_state(tmp_path, bundle_id, queued["id"], "ready")
@@ -159,7 +178,11 @@ def test_cancel_ready_job_removes_artifact_and_prevents_download(tmp_path):
 
     cancelled = J.cancel(tmp_path, bundle_id, queued["id"])
     assert cancelled["state"] == "cancelled"
-    assert not artifact.exists()
+    # A FileResponse may not have opened the returned path yet. Keep the inode
+    # available to that in-flight response and let normal TTL cleanup remove it.
+    assert artifact.exists()
+    J.cancel(tmp_path, bundle_id, queued["id"])
+    assert artifact.exists()
     with pytest.raises(ApiError) as error:
         J.result(tmp_path, bundle_id, queued["id"])
     assert error.value.status == 409
@@ -198,3 +221,43 @@ def test_cancel_queued_job_before_worker_starts(tmp_path, monkeypatch):
     release.set()
     assert _wait_state(tmp_path, bundle_id, queued["id"], "cancelled")["state"] == "cancelled"
     assert not list(J._job_dir(tmp_path, bundle_id, queued["id"]).glob("artifact.*"))
+
+
+def test_progress_reporter_throttles_writes_and_always_flushes_final_phase(tmp_path, monkeypatch):
+    writes = []
+    clock = [0.0]
+    monkeypatch.setattr(J, "_update_progress", lambda _job_dir, *event: writes.append(event))
+    reporter = J._ProgressReporter(tmp_path, interval=0.5, clock=lambda: clock[0])
+
+    reporter(0, 200, "preparing")
+    for completed in range(1, 201):
+        clock[0] += 0.01
+        reporter(completed, 200, "writing")
+    reporter(200, 200, "finalizing")
+
+    assert writes[0] == (0, 200, "preparing")
+    assert writes[-1] == (200, 200, "finalizing")
+    assert len(writes) <= 6
+
+
+def test_xlsx_checks_cancellation_inside_a_large_document(tmp_path, monkeypatch):
+    bundle_id = _make_bundle(tmp_path, ids=("D1",))
+    detail = {
+        "score": {"ao": None, "harness": None},
+        "classification": {"ao": None, "harness": None},
+        "doc_type": "", "review": "",
+        "golden": {"documents": [{"extracted_fields": [
+            {"key": f"field-{i}", "value": "value", "dtype": "string"} for i in range(1000)
+        ], "extracted_groups": [], "extracted_tables": []}]},
+        "compare": [],
+    }
+    monkeypatch.setattr(E.B, "doc_detail", lambda *_args, **_kwargs: detail)
+    checks = [0]
+
+    def cancel_after_a_few_rows():
+        checks[0] += 1
+        return checks[0] >= 4
+
+    with pytest.raises(E.ExportCancelled):
+        E.export_golden_xlsx(tmp_path, bundle_id, cancel_check=cancel_after_a_few_rows)
+    assert checks[0] == 4

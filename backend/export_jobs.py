@@ -22,10 +22,15 @@ _JOB_TTL_SECONDS = 24 * 60 * 60
 _MAX_CONCURRENT_EXPORTS = 2
 _MAX_PENDING_EXPORTS = 20
 _SLOT_POLL_SECONDS = 0.2
+_PROGRESS_WRITE_INTERVAL = 0.5
 _LEASE_SECONDS = 90
 _HEARTBEAT_SECONDS = 15
+_SHUTDOWN_JOIN_SECONDS = 5
 _PG_INIT_PID = None
 _PG_INIT_LOCK = threading.Lock()
+_WORKERS: dict[tuple[str, str, str], threading.Thread] = {}
+_WORKERS_LOCK = threading.Lock()
+_SHUTTING_DOWN: set[str] = set()
 
 
 def _pg(data_dir: Path) -> bool:
@@ -197,6 +202,7 @@ def _cleanup_expired(root: Path, data_dir: Path) -> None:
                 "SELECT bundle_id,id,state FROM export_jobs WHERE namespace=%s",
                 (namespace,),
             ).fetchall()
+        known_dirs = {(bundle_id, job_id) for bundle_id, job_id, _state in rows}
         for bundle_id, job_id, _ in rows:
             job_dir = root / bundle_id / job_id
             if not job_dir.is_dir():
@@ -224,6 +230,25 @@ def _cleanup_expired(root: Path, data_dir: Path) -> None:
                 continue
             if remove:
                 shutil.rmtree(job_dir, ignore_errors=True)
+        # A hard process stop after bundle cascade can leave files with no row to
+        # drive the usual TTL cleanup. Remove such directories only after their
+        # own contents have been idle for the full retention interval.
+        cutoff = time.time() - _JOB_TTL_SECONDS
+        if root.is_dir():
+            for bundle_dir in root.iterdir():
+                if not bundle_dir.is_dir() or bundle_dir.name.startswith("."):
+                    continue
+                for job_dir in bundle_dir.iterdir():
+                    if not job_dir.is_dir() or (bundle_dir.name, job_dir.name) in known_dirs:
+                        continue
+                    try:
+                        children = list(job_dir.iterdir())
+                        activity = (max(child.stat().st_mtime for child in children)
+                                    if children else job_dir.stat().st_mtime)
+                    except OSError:
+                        continue
+                    if activity < cutoff:
+                        shutil.rmtree(job_dir, ignore_errors=True)
         return
     if not root.is_dir():
         return
@@ -352,12 +377,20 @@ def _cancelled(job_dir: Path) -> bool:
 
 
 class _CancellationProbe:
-    def __init__(self, job_dir: Path):
+    def __init__(self, job_dir: Path, owner_token: str = "", lease_lost: threading.Event | None = None):
         self.job_dir = job_dir
+        self.owner_token = owner_token
+        self.lease_lost = lease_lost
         self.last_check = 0.0
         self.value = False
+        self.lease_failure_reported = False
 
     def __call__(self) -> bool:
+        if self.lease_lost is not None and self.lease_lost.is_set():
+            if not self.lease_failure_reported:
+                self.lease_failure_reported = True
+                _mark_lease_lost(self.job_dir, self.owner_token)
+            return True
         if not DB.enabled():
             return _cancelled(self.job_dir)
         now = time.monotonic()
@@ -365,6 +398,19 @@ class _CancellationProbe:
             self.value = _cancelled(self.job_dir)
             self.last_check = now
         return self.value
+
+
+def _mark_lease_lost(job_dir: Path, owner_token: str) -> None:
+    try:
+        with _locked(job_dir) as _:
+            state = _read_state(job_dir)
+            if state.get("state") == "running" and state.get("owner_token") == owner_token:
+                state.update(state="failed", phase="failed",
+                             message="작업 상태 연결이 끊겨 내보내기를 중단했습니다.")
+                _write_state(job_dir, state)
+    except Exception:
+        # The database can still be unavailable; an expired lease is recovered later.
+        pass
 
 
 def _update_progress(job_dir: Path, completed: int, total: int, phase: str) -> None:
@@ -380,6 +426,32 @@ def _update_progress(job_dir: Path, completed: int, total: int, phase: str) -> N
                               "writing": "문서를 내보내고 있습니다.",
                               "finalizing": "파일을 마무리하고 있습니다."}.get(phase, phase))
         _write_state(job_dir, state)
+
+
+class _ProgressReporter:
+    """Persist progress at most twice a second, with preparing/finalizing always visible."""
+    def __init__(self, job_dir: Path, interval: float = _PROGRESS_WRITE_INTERVAL,
+                 clock=time.monotonic):
+        self.job_dir = job_dir
+        self.interval = interval
+        self.clock = clock
+        self.last_write: float | None = None
+        self.latest: tuple[int, int, str] | None = None
+
+    def __call__(self, completed: int, total: int, phase: str) -> None:
+        now = self.clock()
+        self.latest = (completed, total, phase)
+        if (self.last_write is None or phase in ("preparing", "finalizing")
+                or now - self.last_write >= self.interval):
+            self.flush(now)
+
+    def flush(self, now: float | None = None) -> None:
+        if self.latest is None:
+            return
+        completed, total, phase = self.latest
+        _update_progress(self.job_dir, completed, total, phase)
+        self.latest = None
+        self.last_write = self.clock() if now is None else now
 
 
 def _mark_cancelled(job_dir: Path) -> None:
@@ -403,28 +475,109 @@ def _mark_cancelled(job_dir: Path) -> None:
                 if exc.status != 404:
                     raise
     (job_dir / "artifact.part").unlink(missing_ok=True)
-    (job_dir / "artifact.zip").unlink(missing_ok=True)
-    (job_dir / "artifact.xlsx").unlink(missing_ok=True)
 
 
-def _heartbeat_loop(job_dir: Path, owner_token: str, stopped: threading.Event) -> None:
+def _best_effort_mark_cancelled(job_dir: Path) -> None:
+    try:
+        _mark_cancelled(job_dir)
+    except Exception:
+        # Cancellation was already recorded by the request, or PostgreSQL is
+        # temporarily unavailable. Do not strand a worker thread on error reporting.
+        pass
+
+
+def _heartbeat_loop(job_dir: Path, owner_token: str, stopped: threading.Event,
+                    lease_lost: threading.Event) -> None:
+    failure_since = None
     while not stopped.wait(_HEARTBEAT_SECONDS):
         try:
             with _locked(job_dir) as _:
                 state = _read_state(job_dir)
                 if state.get("state") not in ("queued", "running") or state.get("owner_token") != owner_token:
+                    lease_lost.set()
                     return
                 state["heartbeat_at"] = _now()
                 _write_state(job_dir, state)
         except Exception:
-            # A transient database failure should not abort file generation; lease recovery
-            # will be conservative and the next heartbeat can refresh once storage recovers.
+            if failure_since is None:
+                failure_since = time.monotonic()
+            elif time.monotonic() - failure_since >= _LEASE_SECONDS:
+                lease_lost.set()
+                return
             continue
+        failure_since = None
+
+
+def _worker_key(data_dir: Path, bundle_id: str, job_id: str) -> tuple[str, str, str]:
+    return str(Path(data_dir).expanduser().resolve()), bundle_id, job_id
+
+
+def _worker_entry(data_dir: Path, bundle_id: str, job_dir: Path) -> None:
+    key = _worker_key(data_dir, bundle_id, job_dir.name)
+    try:
+        _run_job(data_dir, bundle_id, job_dir)
+    finally:
+        with _WORKERS_LOCK:
+            _WORKERS.pop(key, None)
+
+
+def startup(data_dir: Path) -> None:
+    """Allow exports for a new application lifespan in the current process."""
+    root = str(Path(data_dir).expanduser().resolve())
+    with _WORKERS_LOCK:
+        _SHUTTING_DOWN.discard(root)
+
+
+def shutdown(data_dir: Path) -> None:
+    """Cancel this process's pending exports and join workers before DB pool shutdown."""
+    data_dir = Path(data_dir)
+    root = str(data_dir.expanduser().resolve())
+    with _WORKERS_LOCK:
+        _SHUTTING_DOWN.add(root)
+        workers = [(key, thread) for key, thread in _WORKERS.items() if key[0] == root]
+    if DB.enabled() and workers:
+        bundle_ids = [key[1] for key, _thread in workers]
+        job_ids = [key[2] for key, _thread in workers]
+        try:
+            with DB.connection() as conn:
+                # Take the same per-job advisory locks as worker state updates so
+                # a stale progress snapshot cannot overwrite the shutdown cancel.
+                for bundle_id, job_id in sorted(set(zip(bundle_ids, job_ids))):
+                    with DB.lock(data_dir, _job_lock_resource(bundle_id, job_id)) as acquired:
+                        if not acquired:
+                            raise B.ApiError(503, "could not lock export job during shutdown")
+                conn.execute("""
+                    UPDATE export_jobs
+                    SET state=state || %s::jsonb
+                    WHERE namespace=%s AND state->>'state' IN ('queued','running')
+                      AND (bundle_id,id) IN (SELECT * FROM unnest(%s::text[],%s::text[]))
+                """, (json.dumps({"state": "cancelled", "phase": "cancelled",
+                                   "message": "서버 종료로 내보내기를 취소했습니다.",
+                                   "updated_at": _now()}, ensure_ascii=False),
+                      DB.namespace(data_dir), bundle_ids, job_ids))
+        except Exception:
+            # Workers still get a bounded join; a later startup recovers expired leases.
+            pass
+    else:
+        for (worker_root, bundle_id, job_id), _thread in workers:
+            try:
+                cancel(Path(worker_root), bundle_id, job_id)
+            except Exception:
+                pass
+    for (worker_root, bundle_id, job_id), _thread in workers:
+        try:
+            (Path(worker_root) / ".cache" / "export-jobs" / bundle_id / job_id / "artifact.part").unlink(missing_ok=True)
+        except OSError:
+            pass
+    deadline = time.monotonic() + _SHUTDOWN_JOIN_SECONDS
+    for _key, thread in workers:
+        thread.join(max(0.0, deadline - time.monotonic()))
 
 
 def _run_job(data_dir: Path, bundle_id: str, job_dir: Path) -> None:
     slot = None
     heartbeat_stop = threading.Event()
+    lease_lost = threading.Event()
     heartbeat_thread = None
     owner_token = ""
     try:
@@ -432,12 +585,12 @@ def _run_job(data_dir: Path, bundle_id: str, job_dir: Path) -> None:
             initial = _read_state(job_dir)
             owner_token = initial.get("owner_token", "")
             heartbeat_thread = threading.Thread(target=_heartbeat_loop,
-                                               args=(job_dir, owner_token, heartbeat_stop),
+                                               args=(job_dir, owner_token, heartbeat_stop, lease_lost),
                                                daemon=True, name=f"export-heartbeat-{job_dir.name}")
             heartbeat_thread.start()
         while slot is None:
             if _cancelled(job_dir):
-                _mark_cancelled(job_dir)
+                _best_effort_mark_cancelled(job_dir)
                 return
             slot = _slot_lock(data_dir)
             if slot is None:
@@ -452,15 +605,16 @@ def _run_job(data_dir: Path, bundle_id: str, job_dir: Path) -> None:
                              owner_pid=os.getpid(), heartbeat_at=_now())
                 _write_state(job_dir, state)
         if stopped:
-            _mark_cancelled(job_dir)
+            _best_effort_mark_cancelled(job_dir)
             return
 
         fmt = state["format"]
         target = job_dir / "artifact.part"
-        cancel_probe = _CancellationProbe(job_dir)
+        cancel_probe = _CancellationProbe(job_dir, owner_token, lease_lost)
+        progress_reporter = _ProgressReporter(job_dir)
         with target.open("wb") as out:
             hooks = {"ids": state["doc_ids"],
-                     "progress": lambda n, total, phase: _update_progress(job_dir, n, total, phase),
+                     "progress": progress_reporter,
                      "cancel_check": cancel_probe,
                      "out": out}
             if fmt == "zip":
@@ -471,6 +625,13 @@ def _run_job(data_dir: Path, bundle_id: str, job_dir: Path) -> None:
             os.fsync(out.fileno())
         with _locked(job_dir) as _:
             state = _read_state(job_dir)
+            if lease_lost.is_set():
+                if state.get("state") == "running" and state.get("owner_token") == owner_token:
+                    state.update(state="failed", phase="failed",
+                                 message="작업 상태 연결이 끊겨 내보내기를 중단했습니다.")
+                    _write_state(job_dir, state)
+                target.unlink(missing_ok=True)
+                return
             if state.get("state") == "cancelled" or _cancelled(job_dir):
                 state.update(state="cancelled", phase="cancelled", message="내보내기를 취소했습니다.")
                 _write_state(job_dir, state)
@@ -486,7 +647,7 @@ def _run_job(data_dir: Path, bundle_id: str, job_dir: Path) -> None:
                          message="내보내기가 완료되었습니다.", artifact=artifact.name)
             _write_state(job_dir, state)
     except E.ExportCancelled:
-        _mark_cancelled(job_dir)
+        _best_effort_mark_cancelled(job_dir)
     except BaseException:
         try:
             with _locked(job_dir) as _:
@@ -496,21 +657,39 @@ def _run_job(data_dir: Path, bundle_id: str, job_dir: Path) -> None:
                     # deployment paths. Keep client-visible messages generic.
                     state.update(state="failed", phase="failed", message="내보내기에 실패했습니다.")
                     _write_state(job_dir, state)
-        except B.ApiError as missing:
-            if missing.status != 404:
-                raise
+        except Exception:
+            # If the database is unavailable, let the heartbeat lease recover the
+            # job after connectivity returns instead of leaking a worker exception.
+            pass
         (job_dir / "artifact.part").unlink(missing_ok=True)
     finally:
         heartbeat_stop.set()
         if heartbeat_thread is not None:
             heartbeat_thread.join(timeout=1)
-        _release_slot(slot)
+        try:
+            _release_slot(slot)
+        except Exception:
+            # Closing the failed session releases its advisory lock server-side.
+            pass
+        if DB.enabled():
+            try:
+                _read_state(job_dir)
+            except B.ApiError as exc:
+                if exc.status == 404:
+                    shutil.rmtree(job_dir, ignore_errors=True)
+            except Exception:
+                # A transient DB outage is not evidence that the row was deleted.
+                pass
 
 
 def start(data_dir: Path, bundle_id: str, format: str, scope: str = "enabled",
           doc_ids: list[str] | None = None) -> dict:
     """Validate and start a shared, background export job."""
     _ensure_pg(data_dir)
+    root_key = str(Path(data_dir).expanduser().resolve())
+    with _WORKERS_LOCK:
+        if root_key in _SHUTTING_DOWN:
+            raise B.ApiError(503, "export service is shutting down")
     if format not in ("xlsx", "zip"):
         raise B.ApiError(422, "format must be 'xlsx' or 'zip'")
     bdir = B.bundle_dir(data_dir, bundle_id)
@@ -538,11 +717,25 @@ def start(data_dir: Path, bundle_id: str, format: str, scope: str = "enabled",
         }
         if DB.enabled():
             state.update(owner_token=secrets.token_hex(16), owner_host=socket.gethostname(), heartbeat_at=_now())
-        _write_state(job_dir, state, create=True)
+        try:
+            _write_state(job_dir, state, create=True)
+        except Exception:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise
     try:
-        threading.Thread(target=_run_job, args=(Path(data_dir), bundle_id, job_dir), daemon=True,
-                         name=f"export-{job_id}").start()
+        worker = threading.Thread(target=_worker_entry, args=(Path(data_dir), bundle_id, job_dir), daemon=True,
+                                  name=f"export-{job_id}")
+        key = _worker_key(Path(data_dir), bundle_id, job_id)
+        with _WORKERS_LOCK:
+            if root_key in _SHUTTING_DOWN:
+                state.update(state="failed", phase="failed", message="서버가 종료 중이라 작업을 시작하지 못했습니다.")
+                _write_state(job_dir, state)
+                return _public(state)
+            _WORKERS[key] = worker
+            worker.start()
     except Exception:
+        with _WORKERS_LOCK:
+            _WORKERS.pop(_worker_key(Path(data_dir), bundle_id, job_id), None)
         state.update(state="failed", phase="failed", message="내보내기 작업을 시작하지 못했습니다.")
         _write_state(job_dir, state)
     return _public(state)
@@ -563,12 +756,17 @@ def cancel(data_dir: Path, bundle_id: str, job_id: str) -> dict:
         (job_dir / "cancel.flag").touch(exist_ok=True)
     with _locked(job_dir) as _:
         state = _read_state(job_dir)
+        was_ready = state.get("state") == "ready" or (
+            state.get("state") == "cancelled" and bool(state.get("artifact")))
         if state.get("state") in ("queued", "running", "ready"):
             state.update(state="cancelled", phase="cancelled", message="내보내기를 취소했습니다.")
             _write_state(job_dir, state)
         (job_dir / "artifact.part").unlink(missing_ok=True)
-        (job_dir / "artifact.zip").unlink(missing_ok=True)
-        (job_dir / "artifact.xlsx").unlink(missing_ok=True)
+        # Keep a ready artifact until TTL cleanup: result() may already have handed
+        # its path to FileResponse, which opens it just after releasing this lock.
+        if not was_ready:
+            (job_dir / "artifact.zip").unlink(missing_ok=True)
+            (job_dir / "artifact.xlsx").unlink(missing_ok=True)
         return _public(state)
 
 

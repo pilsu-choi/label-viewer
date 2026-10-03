@@ -187,3 +187,8 @@ status: active
 
 - Creation: `2026-10-03-postgresql.md` — PostgreSQL 저장, 이관·롤백, 배포 구성과 검증 기록.
 - Update: README와 API 문서에 DB 실행·백업·장애 처리 안내 추가.
+
+## 2026-10-03 성능·회전
+
+- Creation: `2026-10-03-postgres-performance-audit.md` — 연결 풀·상태 조회·진행률 개선, 코드 점검 수정과 이미지 회전 구현·실측 기록.
+- Update: README/API에 회전 보기, DB 풀 설정, 취소 후 파일 보관·초기 이관 완료 표식 설명.

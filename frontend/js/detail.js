@@ -26,12 +26,13 @@ function readReconRatio() {
 function writeReconRatio(r) { try { localStorage.setItem('lv.reconRatio', r.toFixed(3)); } catch {} }
 
 export function renderDetail(root, bundleId, docId) {
-  const state = { view: null, page: 1, tab: 'edit', reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), railCollapsed: readFlag('lv.railCollapsed'), panelCollapsed: readFlag('lv.panelCollapsed'), reconCollapsed: readFlag('lv.reconCollapsed') };
+  const state = { view: null, page: 1, tab: 'edit', rotations: {}, reconSource: 'golden', reconRenderer: 'html', mismatchCursor: -1, focusMode: readFocusMode(), railCollapsed: readFlag('lv.railCollapsed'), panelCollapsed: readFlag('lv.panelCollapsed'), reconCollapsed: readFlag('lv.reconCollapsed') };
   let doc = null, bundle = null, editor = null, compareApi = null, imgViewer = null, documentRail = null;
-  let saveStateEl, reviewInput, enabledInput, offBadge, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, helpOverlay = null;
+  let saveStateEl, reviewInput, enabledInput, offBadge, reconBody, reconSourceButtons = {}, tabHosts = {}, tabButtons = {}, viewToggleBtns = {}, focusModeBtns = {}, pageLabel, pageNavEl, zoomLabel, rotationLabel, helpOverlay = null;
   let leftPanel, rightPanel, closeExportMenus, dragCleanup;
   let railHost, workspace, body, rightCollapseBtn;
   let destroyed = false, compareStale = false, rawBuilt = false;
+  let activeRotationKey = null;
   const drawReconLater = debounce(() => drawRecon(), 300);
 
   mount(root, el('div', { class: 'loading-block' }, '불러오는 중…'));
@@ -180,14 +181,17 @@ export function renderDetail(root, bundleId, docId) {
   }
 
   function loadImage() {
+    if (imgViewer && activeRotationKey) state.rotations[activeRotationKey] = imgViewer.getRotation();
     imgViewer && imgViewer.clearFocus();
     const pages = (doc.pages && doc.pages[state.view]) || 1;
     state.page = Math.min(Math.max(1, state.page), Math.max(1, pages));
     if (pageLabel) pageLabel.textContent = pages > 1 ? `${state.page} / ${pages}` : '';
     if (pageNavEl) pageNavEl.style.display = pages > 1 ? 'flex' : 'none';
+    activeRotationKey = `${state.view}:${state.page}`;
+    if (imgViewer) imgViewer.setRotation(state.rotations[activeRotationKey] || 0);
     if (!doc.has[state.view]) { imgViewer.empty('이미지가 없습니다.'); return; }
     imgViewer.empty();
-    imgViewer.load(api.imageUrl(bundleId, docId, state.view, state.page)).catch((e) => imgViewer.empty(e.message));
+    imgViewer.load(api.imageUrl(bundleId, docId, state.view, state.page)).catch((e) => { if (!destroyed) imgViewer.empty(e.message); });
   }
 
   function onHoverBbox(bboxList) {
@@ -293,6 +297,7 @@ export function renderDetail(root, bundleId, docId) {
 
     pageLabel = el('span', {}, '');
     zoomLabel = el('span', { class: 'zoom-pct' }, '100%');
+    rotationLabel = el('span', { class: 'rotation-angle', 'aria-live': 'polite' }, '0°');
     const stage = el('div', { class: 'viewer-stage' });
     pageNavEl = el('div', { class: 'page-nav', style: 'display:none' }, [
       el('button', { class: 'btn sm icon', onclick: () => { state.page--; loadImage(); } }, icon('chevron-left')),
@@ -307,12 +312,20 @@ export function renderDetail(root, bundleId, docId) {
         el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomOut(), title: '축소' }, icon('zoom-out')),
         el('button', { class: 'btn sm icon', onclick: () => imgViewer.zoomIn(), title: '확대' }, icon('zoom-in')),
         zoomLabel,
+        el('button', { class: 'btn sm icon', onclick: () => { imgViewer.rotateLeft(); state.rotations[activeRotationKey] = imgViewer.getRotation(); }, title: '왼쪽으로 90도 회전', 'aria-label': '왼쪽으로 90도 회전' }, icon('rotate-ccw')),
+        el('button', { class: 'btn sm icon', onclick: () => { imgViewer.rotateRight(); state.rotations[activeRotationKey] = imgViewer.getRotation(); }, title: '오른쪽으로 90도 회전', 'aria-label': '오른쪽으로 90도 회전' }, icon('rotate-cw')),
+        rotationLabel,
+        el('button', { class: 'btn ghost sm', onclick: () => { imgViewer.resetRotation(); state.rotations[activeRotationKey] = 0; }, title: '회전 초기화', 'aria-label': '회전 초기화' }, '회전 초기화'),
         el('button', { class: 'btn ghost sm', onclick: () => imgViewer.fitWidth(), title: '너비 맞춤' }, [icon('columns'), el('span', { class: 'lbl' }, '너비 맞춤')]),
         el('button', { class: 'btn ghost sm', onclick: () => imgViewer.fitPage(), title: '전체 보기' }, [icon('maximize'), el('span', { class: 'lbl' }, '전체 보기')]),
       ]),
     ]);
     leftPanel = el('div', { class: 'detail-left' }, [viewerToolbar, stage]);
-    imgViewer = createImageViewer(stage, { onZoomChange: (s) => { zoomLabel.textContent = `${Math.round(s * 100)}%`; }, focusMode: state.focusMode });
+    imgViewer = createImageViewer(stage, {
+      onZoomChange: (s) => { if (zoomLabel) zoomLabel.textContent = `${Math.round(s * 100)}%`; },
+      onRotationChange: (angle) => { if (rotationLabel) rotationLabel.textContent = `${angle}°`; },
+      focusMode: state.focusMode,
+    });
 
     // --- 우측: 탭 + 재구성 ---
     tabButtons.edit = el('button', { class: 'tab-btn active' }, '편집');

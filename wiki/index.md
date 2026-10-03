@@ -49,3 +49,5 @@ status: active
 - [내보내기 진행률·선택 문서와 Golden 이력·충돌 감지](2026-10-03-review-tools.md)
 
 - [PostgreSQL 메타데이터 저장 도입](2026-10-03-postgresql.md)
+
+- [PostgreSQL 성능 개선·코드 점검·이미지 회전](2026-10-03-postgres-performance-audit.md)

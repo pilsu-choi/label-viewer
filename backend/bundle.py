@@ -16,10 +16,10 @@ import zipfile
 import zlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, BinaryIO, Callable
 
-from PIL import Image, ImageSequence
+from PIL import Image, ImageOps, ImageSequence
 
 from .compare import compare_bundle, harness_value, score
 from . import db as DB
@@ -106,6 +106,25 @@ def _safe_id(value: str, what: str = "id") -> str:
     if not _ID_RE.fullmatch(value or "") or value in (".", ".."):
         raise ApiError(400, f"invalid {what}: {value!r}")
     return value
+
+
+def _safe_upload_doc_id(relpath: str) -> str:
+    doc_id = _safe_id(stem_of(relpath), "doc_id")
+    # ZIP entries can contain Windows drive-prefixed names even on POSIX.
+    if PureWindowsPath(doc_id).drive:
+        raise ApiError(400, f"invalid doc_id: {doc_id!r}")
+    return doc_id
+
+
+def _storable_kind(relpath: str) -> str | None:
+    kind = classify(relpath)
+    if kind is None:
+        return None
+    ext = Path(relpath).suffix.lower()
+    if ext not in ({".json"} if kind in JSON_KINDS else IMAGE_EXTS):
+        return None
+    _safe_upload_doc_id(relpath)
+    return kind
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -239,8 +258,9 @@ def _zip_entries(zf: zipfile.ZipFile) -> list[tuple[str, zipfile.ZipInfo]]:
         if info.is_dir():
             continue
         name = _zip_name(info)
-        norm = PurePosixPath(name)
-        if norm.is_absolute() or ".." in norm.parts:
+        norm = PurePosixPath(name.replace("\\", "/"))
+        win = PureWindowsPath(name)
+        if norm.is_absolute() or ".." in norm.parts or win.is_absolute() or win.drive:
             continue  # zip slip 방지
         out.append((name, info))
     return out
@@ -280,7 +300,7 @@ def _create_bundle(data_dir: Path, bundle_name: str, entries: list[tuple[str, An
                    open_src: Callable[[Any], BinaryIO] = lambda f: f) -> str:
     # macOS NFD 파일명을 NFC로 맞춰 폴더 키 인식과 다른 출처 파일과의 문서 매칭을 보장한다
     entries = [(unicodedata.normalize("NFC", relpath), src) for relpath, src in entries]
-    kinds = {classify(relpath) for relpath, _ in entries}
+    kinds = {_storable_kind(relpath) for relpath, _ in entries}
     if not kinds.intersection(DOC_KINDS):
         if "ao_ui" in kinds:
             raise ApiError(400, "AO UI sidecar만으로는 문서를 만들 수 없습니다. 원본 이미지 또는 AO 추출 JSON을 함께 업로드하세요.")
@@ -320,18 +340,41 @@ def _create_bundle(data_dir: Path, bundle_name: str, entries: list[tuple[str, An
 
 def _write_entries(bdir: Path, entries: list[tuple[str, Any]], open_src: Callable[[Any], BinaryIO]) -> None:
     used: dict[tuple[str, str], int] = {}
+    allocated: dict[str, set[str]] = {}
+    # Reserve every literal source stem first. Otherwise a duplicate ``doc``
+    # can be assigned ``doc~2`` and overwrite a distinct uploaded ``doc~2``.
+    reserved = set()
+    for relpath, _src in entries:
+        kind = _storable_kind(relpath)
+        if kind is not None:
+            reserved.add((kind, _safe_upload_doc_id(relpath)))
     for relpath, src in entries:
-        kind = classify(relpath)
+        kind = _storable_kind(relpath)
         if kind is None:
             continue
-        doc_id = stem_of(relpath)
+        ext = Path(relpath).suffix.lower()
+        doc_id = _safe_upload_doc_id(relpath)
         key = (kind, doc_id)
         n = used.get(key, 0)
         used[key] = n + 1
-        final_id = doc_id if n == 0 else f"{doc_id}~{n + 1}"
-        ext = Path(relpath).suffix.lower()
-        if ext not in ({".json"} if kind in JSON_KINDS else IMAGE_EXTS):
-            continue
+        kind_allocated = allocated.setdefault(kind, set())
+        if n == 0:
+            final_id = doc_id
+        else:
+            suffix = n + 1
+            final_id = f"{doc_id}~{suffix}"
+            while (kind, final_id) in reserved or final_id in kind_allocated:
+                suffix += 1
+                final_id = f"{doc_id}~{suffix}"
+        if final_id in kind_allocated:
+            # Distinct stems are reserved above, so this is only reachable for
+            # malformed duplicate inputs after suffix allocation.
+            suffix = max(n + 1, 2)
+            final_id = f"{doc_id}~{suffix}"
+            while (kind, final_id) in reserved or final_id in kind_allocated:
+                suffix += 1
+                final_id = f"{doc_id}~{suffix}"
+        kind_allocated.add(final_id)
         dest = bdir / kind / f"{final_id}{ext}"
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -531,7 +574,9 @@ def _doc_type_suggest(parsed: dict) -> str:
     return ""
 
 
-def _doc_detail_unlocked(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
+def _doc_detail_unlocked(data_dir: Path, bundle_id: str, doc_id: str,
+                         *, state_snapshot: dict | None = None,
+                         include_pages: bool = True) -> dict:
     _safe_id(doc_id, "doc_id")
     bdir = bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
@@ -539,7 +584,7 @@ def _doc_detail_unlocked(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     ids = doc_ids(bdir)
     if doc_id not in ids:
         raise ApiError(404, "document not found")
-    state = load_state(bdir)
+    state = state_snapshot if state_snapshot is not None else load_state(bdir)
     paths = {k: find_kind_file(bdir, k, doc_id) for k in DOC_KINDS}
     has = {k: paths[k] is not None for k in DOC_KINDS}
     has["ao_ui"] = find_kind_file(bdir, "ao_ui", doc_id) is not None
@@ -579,7 +624,7 @@ def _doc_detail_unlocked(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
         "pages": {
             "original": page_count(paths["original"]) if paths["original"] else 0,
             "preprocessed": page_count(paths["preprocessed"]) if paths["preprocessed"] else 0,
-        },
+        } if include_pages else None,
         "golden": parsed["golden"], "ao": parsed["ao_extract"], "harness": parsed["harness"],
         "compare": rows,
         "score": {"ao": score(rows, "ao") if golden_doc else None,
@@ -589,14 +634,16 @@ def _doc_detail_unlocked(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     }
 
 
-def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
+def doc_detail(data_dir: Path, bundle_id: str, doc_id: str, *, state_snapshot: dict | None = None,
+               include_pages: bool = True) -> dict:
     """Read Golden bytes and parsed content under a shared lock for a coherent revision."""
     bdir = bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
         raise ApiError(404, "bundle not found")
     _safe_id(doc_id, "doc_id")
     with _golden_lock(bdir, doc_id, shared=True):
-        return _doc_detail_unlocked(data_dir, bundle_id, doc_id)
+        return _doc_detail_unlocked(data_dir, bundle_id, doc_id, state_snapshot=state_snapshot,
+                                    include_pages=include_pages)
 
 
 def _doc_summary(bdir: Path, doc_id: str, rv: str) -> dict:
@@ -689,14 +736,16 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
 SCOPES = ("enabled", "disabled")
 
 
-def scope_doc_ids(data_dir: Path, bundle_id: str, scope: str) -> list[str]:
+def scope_doc_ids(data_dir: Path, bundle_id: str, scope: str, *,
+                  state_snapshot: dict | None = None) -> list[str]:
     """내보내기 범위(활성·비활성)에 드는 문서 ID."""
     if scope not in SCOPES:
         raise ApiError(422, f"scope must be one of {SCOPES}")
     bdir = bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
         raise ApiError(404, "bundle not found")
-    disabled = disabled_ids(load_state(bdir))
+    state = state_snapshot if state_snapshot is not None else load_state(bdir)
+    disabled = disabled_ids(state)
     return [d for d in doc_ids(bdir) if (d in disabled) == (scope == "disabled")]
 
 
@@ -863,7 +912,7 @@ def _golden_lock(bdir: Path, doc_id: str, shared: bool = False):
         def capture() -> None:
             nonlocal path, before
             path = _current_golden_path(bdir, doc_id)
-            before = path.read_bytes() if path.exists() else None
+            before = path.read_bytes() if not shared and path.exists() else None
 
         def rollback() -> None:
             if shared or path is None:
@@ -885,7 +934,7 @@ def _golden_lock(bdir: Path, doc_id: str, shared: bool = False):
                 capture()
                 try:
                     with DB.connection():
-                        yield
+                        yield path, before
                 except BaseException:
                     rollback()
                     raise
@@ -895,7 +944,7 @@ def _golden_lock(bdir: Path, doc_id: str, shared: bool = False):
                 fcntl.flock(lock_file, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
                 capture()
                 try:
-                    yield
+                    yield path, before
                 except BaseException:
                     rollback()
                     raise
@@ -916,9 +965,8 @@ def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
-    gpath = _current_golden_path(bdir, doc_id)
-    with _golden_lock(bdir, doc_id):
-        before = gpath.read_bytes() if gpath.exists() else None
+    with _golden_lock(bdir, doc_id) as (gpath, before):
+        _require_doc(bdir, doc_id)
         _check_golden_revision(before, expected_revision)
         if before is not None:
             raise ApiError(409, "golden already exists")
@@ -950,11 +998,11 @@ def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_
         _archive_baseline_if_needed(bdir, doc_id, before)
         _atomic_write_json(gpath, data)
         try:
+            result = _doc_detail_unlocked(data_dir, bundle_id, doc_id)
             archive_snapshot(bdir, doc_id, gpath.read_bytes(), "create")
         except Exception:
             gpath.unlink(missing_ok=True)
             raise
-        result = _doc_detail_unlocked(data_dir, bundle_id, doc_id)
     return result
 
 
@@ -1012,13 +1060,13 @@ def save_golden(data_dir: Path, bundle_id: str, doc_id: str, data: Any,
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
-    p = _current_golden_path(bdir, doc_id)
-    with _golden_lock(bdir, doc_id):
-        before = p.read_bytes() if p.exists() else None
+    with _golden_lock(bdir, doc_id) as (p, before):
+        _require_doc(bdir, doc_id)
         _check_golden_revision(before, expected_revision)
         _archive_baseline_if_needed(bdir, doc_id, before)
         _atomic_write_json(p, data)
         try:
+            result = _doc_detail_unlocked(data_dir, bundle_id, doc_id)
             archive_snapshot(bdir, doc_id, p.read_bytes(), "save")
         except Exception:
             if before is None:
@@ -1035,9 +1083,8 @@ def delete_golden(data_dir: Path, bundle_id: str, doc_id: str,
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
-    p = _current_golden_path(bdir, doc_id)
-    with _golden_lock(bdir, doc_id):
-        before = p.read_bytes() if p.exists() else None
+    with _golden_lock(bdir, doc_id) as (p, before):
+        _require_doc(bdir, doc_id)
         _check_golden_revision(before, expected_revision)
         if before is not None:
             _archive_baseline_if_needed(bdir, doc_id, before)
@@ -1053,8 +1100,8 @@ def list_golden_history(data_dir: Path, bundle_id: str, doc_id: str, limit: int 
                         before: str | None = None) -> dict:
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
-    _require_history_doc(bdir, doc_id)
     with _golden_lock(bdir, doc_id, shared=True):
+        _require_history_doc(bdir, doc_id)
         items = list_snapshots(bdir, doc_id, limit, before)
         current_path = _current_golden_path(bdir, doc_id)
         raw = current_path.read_bytes() if current_path.exists() else None
@@ -1065,36 +1112,35 @@ def list_golden_history(data_dir: Path, bundle_id: str, doc_id: str, limit: int 
 def get_golden_history(data_dir: Path, bundle_id: str, doc_id: str, history_id: str) -> dict:
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
-    _require_history_doc(bdir, doc_id)
-    snapshot = read_snapshot(bdir, doc_id, history_id)
-    if snapshot is None:
-        raise ApiError(404, "golden history entry not found")
-    metadata, raw = snapshot
-    if raw is None:
-        golden = None
-    else:
-        golden, err = _load_json_bytes(raw, True)
-        if golden is None:
-            raise ApiError(422, f"golden history snapshot is invalid: {err or 'invalid JSON'}")
-    return {**metadata, "golden": golden}
+    with _golden_lock(bdir, doc_id, shared=True):
+        _require_history_doc(bdir, doc_id)
+        snapshot = read_snapshot(bdir, doc_id, history_id)
+        if snapshot is None:
+            raise ApiError(404, "golden history entry not found")
+        metadata, raw = snapshot
+        if raw is None:
+            golden = None
+        else:
+            golden, err = _load_json_bytes(raw, True)
+            if golden is None:
+                raise ApiError(422, f"golden history snapshot is invalid: {err or 'invalid JSON'}")
+        return {**metadata, "golden": golden}
 
 
 def restore_golden(data_dir: Path, bundle_id: str, doc_id: str, history_id: str,
                    expected_revision: str) -> dict:
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
-    _require_history_doc(bdir, doc_id)
-    snapshot = read_snapshot(bdir, doc_id, history_id)
-    if snapshot is None:
-        raise ApiError(404, "golden history entry not found")
-    _, restore_raw = snapshot
-    if restore_raw is not None:
-        restored_data, err = _load_json_bytes(restore_raw, True)
-        if restored_data is None:
-            raise ApiError(422, f"golden history snapshot is invalid: {err or 'invalid JSON'}")
-    p = _current_golden_path(bdir, doc_id)
-    with _golden_lock(bdir, doc_id):
-        before = p.read_bytes() if p.exists() else None
+    with _golden_lock(bdir, doc_id) as (p, before):
+        _require_history_doc(bdir, doc_id)
+        snapshot = read_snapshot(bdir, doc_id, history_id)
+        if snapshot is None:
+            raise ApiError(404, "golden history entry not found")
+        _, restore_raw = snapshot
+        if restore_raw is not None:
+            restored_data, err = _load_json_bytes(restore_raw, True)
+            if restored_data is None:
+                raise ApiError(422, f"golden history snapshot is invalid: {err or 'invalid JSON'}")
         _check_golden_revision(before, expected_revision)
         _archive_baseline_if_needed(bdir, doc_id, before)
         if restore_raw is None:
@@ -1102,6 +1148,12 @@ def restore_golden(data_dir: Path, bundle_id: str, doc_id: str, history_id: str,
         else:
             _atomic_write_bytes(p, restore_raw)
         try:
+            if doc_id in doc_ids(bdir):
+                result = _doc_detail_unlocked(data_dir, bundle_id, doc_id)
+            else:
+                result = {"id": doc_id, "golden_revision": golden_revision(None),
+                          "has": {kind: False for kind in (*DOC_KINDS, "ao_ui")},
+                          "golden": None}
             archive_snapshot(bdir, doc_id, restore_raw, "restore")
         except Exception:
             if before is None:
@@ -1109,12 +1161,6 @@ def restore_golden(data_dir: Path, bundle_id: str, doc_id: str, history_id: str,
             else:
                 _atomic_write_bytes(p, before)
             raise
-        if doc_id in doc_ids(bdir):
-            result = _doc_detail_unlocked(data_dir, bundle_id, doc_id)
-        else:
-            result = {"id": doc_id, "golden_revision": golden_revision(None),
-                      "has": {kind: False for kind in (*DOC_KINDS, "ao_ui")},
-                      "golden": None}
     return result
 
 
@@ -1172,18 +1218,20 @@ def get_image(data_dir: Path, bundle_id: str, doc_id: str, view: str, page: int,
 
     cdir = cache_root(data_dir) / bundle_id / view
     cdir.mkdir(parents=True, exist_ok=True)
+    source_stat = src.stat()
+    source_sig = f"{source_stat.st_ino:x}-{source_stat.st_mtime_ns:x}-{source_stat.st_size:x}"
     if w is None:
-        cached = cdir / f"{doc_id}.p{page}.png"
+        cached = cdir / f"{doc_id}.p{page}.{source_sig}.png"
     else:
         w = max(64, min(w, 1600))
-        cached = cdir / f"{doc_id}.p{page}.{src.stat().st_mtime_ns}.w{w}.jpg"
+        cached = cdir / f"{doc_id}.p{page}.{source_sig}.w{w}.jpg"
     if not cached.exists():
         tmp = cached.with_name(f".{secrets.token_hex(4)}{cached.name}")  # 워커 간 동시 생성에도 반쪽 파일이 보이지 않게
         try:
             with Image.open(src) as im:
                 if ext in (".tif", ".tiff"):
                     im.seek(page - 1)
-                im = im.convert("RGB")
+                im = ImageOps.exif_transpose(im).convert("RGB")
             if w is None:
                 im.save(tmp, "PNG", compress_level=1)
             else:

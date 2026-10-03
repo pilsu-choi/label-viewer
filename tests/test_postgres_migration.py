@@ -6,6 +6,7 @@ import os
 import stat
 import sys
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,7 @@ def pg_root(tmp_path, monkeypatch):
     yield tmp_path
     with DB.connection() as conn:
         conn.execute("DELETE FROM bundles WHERE namespace=%s", (namespace,))
+        conn.execute("DELETE FROM metadata_imports WHERE namespace=%s", (namespace,))
 
 
 def _legacy_bundle(data_dir: Path, bundle_id: str = "legacy") -> Path:
@@ -86,6 +88,41 @@ def test_history_import_export_preserves_raw_bytes_and_checksums(pg_root):
     assert json.loads((directory / f"{hid}.meta.json").read_text(encoding="utf-8")) == metadata
 
 
+def test_export_preflights_all_bundle_paths_before_writing_any_state(tmp_path, monkeypatch):
+    present = tmp_path / "bundles" / "a-present"
+    present.mkdir(parents=True)
+    state_path = present / "_state.json"
+    state_path.write_bytes(b"preserve this file if any bundle is missing")
+
+    class Cursor:
+        def fetchall(self):
+            return [("a-present",), ("z-missing",)]
+
+    class Connection:
+        def execute(self, query, _params):
+            assert query.startswith("SELECT bundle_id FROM bundles")
+            return Cursor()
+
+    @contextmanager
+    def fake_lock(*_args, **_kwargs):
+        yield True
+
+    @contextmanager
+    def fake_connection():
+        yield Connection()
+
+    monkeypatch.setattr(DB, "enabled", lambda: True)
+    monkeypatch.setattr(DB, "namespace", lambda _data_dir: "test")
+    monkeypatch.setattr(DB, "lock", fake_lock)
+    monkeypatch.setattr(DB, "connection", fake_connection)
+    monkeypatch.setattr(DB, "read_bundle_state", lambda bdir: {"name": bdir.name})
+
+    with pytest.raises(RuntimeError, match="Bundle files are missing"):
+        M.export_files(tmp_path)
+
+    assert state_path.read_bytes() == b"preserve this file if any bundle is missing"
+
+
 def test_import_fails_queued_jobs_and_rerun_does_not_resurrect_them(pg_root):
     data_dir = pg_root
     _legacy_bundle(data_dir)
@@ -114,7 +151,7 @@ def test_import_fails_queued_jobs_and_rerun_does_not_resurrect_them(pg_root):
 def test_database_outage_returns_503_without_state_file_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("LABEL_VIEWER_DATABASE_URL", "postgresql://bad:bad@127.0.0.1:1/bad?connect_timeout=1")
     monkeypatch.setenv("LABEL_VIEWER_DB_NAMESPACE", f"outage:{uuid.uuid4()}")
-    monkeypatch.setattr(M, "import_files", lambda _data_dir: {})
+    monkeypatch.setattr(M, "import_files", lambda _data_dir, **_kwargs: {})
     bdir = tmp_path / "bundles" / "legacy"
     bdir.mkdir(parents=True)
     (bdir / "_state.json").write_text('{"name":"stale file"}', encoding="utf-8")
@@ -149,3 +186,24 @@ def test_local_configuration_preserves_namespace_with_explicit_database_url(tmp_
     monkeypatch.setenv('LABEL_VIEWER_DB_NAMESPACE', 'explicit-dataset')
     M.configure_from_file(tmp_path)
     assert DB.namespace(tmp_path) == 'explicit-dataset'
+
+
+def test_bootstrap_marker_skips_obsolete_files_without_resurrecting_deleted_jobs(pg_root):
+    bdir = _legacy_bundle(pg_root)
+    assert M.import_files(pg_root, only_if_needed=True)['bundles'] == 1
+    (bdir / '_state.json').write_text('broken old state', encoding='utf-8')
+    job = pg_root / '.cache/export-jobs/legacy/stale-job/job.json'
+    job.parent.mkdir(parents=True)
+    job.write_text('{"id":"stale-job","state":"ready"}')
+    assert M.import_files(pg_root, only_if_needed=True) == {'bundles': 0, 'history': 0, 'jobs': 0}
+    with DB.connection() as conn:
+        assert conn.execute('SELECT count(*) FROM export_jobs WHERE namespace=%s', (DB.namespace(pg_root),)).fetchone()[0] == 0
+
+
+def test_failed_import_does_not_mark_namespace_complete(pg_root):
+    bdir = _legacy_bundle(pg_root)
+    (bdir / '_state.json').write_text('broken')
+    with pytest.raises(ValueError):
+        M.import_files(pg_root, only_if_needed=True)
+    with DB.connection() as conn:
+        assert conn.execute('SELECT 1 FROM metadata_imports WHERE namespace=%s', (DB.namespace(pg_root),)).fetchone() is None

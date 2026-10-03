@@ -483,6 +483,8 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .viewer-stage { position: relative; flex: 1; overflow: hidden; cursor: grab; background: var(--lighttable); }
 .viewer-stage.panning { cursor: grabbing; }
 .viewer-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.viewer-rotated-content { position: absolute; transform-origin: center center; }
+.viewer-rotated-content > img { display: block; max-width: none; }
 .viewer-canvas img { display: block; max-width: none; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow-sm); user-select: none; -webkit-user-drag: none; }
 .bbox-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
 .bbox-rect { position: absolute; z-index: 1; box-sizing: border-box; background: var(--hl); mix-blend-mode: multiply; border: 2px solid var(--accent); outline: 1px solid var(--surface); outline-offset: 1px; border-radius: var(--r-sm); box-shadow: var(--shadow-pop); }
@@ -496,6 +498,7 @@ input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-
 .minimap.visible { opacity: 1; pointer-events: auto; }
 .minimap img { display: block; width: 100%; height: 100%; object-fit: fill; user-select: none; -webkit-user-drag: none; }
 .mm-boxes { position: absolute; inset: 0; }
+.mm-rotated-content { position: absolute; transform-origin: center center; }
 .mm-rect { position: absolute; box-sizing: border-box; border: 1px solid var(--accent); background: var(--accent-soft); }
 .mm-viewport { position: absolute; box-sizing: border-box; border: 2px solid var(--accent); background: var(--accent-soft); opacity: .6; }
 

@@ -20,7 +20,7 @@ pip install -r requirements-dev.txt && python3 -m pytest tests -q
 
 Golden 편집 패널의 `버전 기록`에서 저장·삭제·복원 이력을 확인하고 이전 내용을 복원한다. 미저장 변경이 있으면 저장 후 복원 또는 변경을 버리고 복원을 선택한다. 다른 탭에서 먼저 저장했다면 자동 저장을 멈추고 충돌을 알린다. 내 변경을 JSON으로 내려받은 뒤 서버의 최신 내용을 불러올 수 있다. 기존 문서는 첫 변경부터 이력을 남기며, 번들을 삭제하면 이력도 삭제된다.
 
-선택 문서 내보내기와 Golden 복원 API는 [API.md](API.md)의 내보내기 작업·Golden 이력 항목을 참고한다. 선택 사항인 브라우저 회귀 검사는 Playwright와 Chromium을 설치한 환경에서 `python scripts/verify_editor_save.py`, `python scripts/verify_golden_history.py`, `python scripts/verify_export_ui.py`로 실행한다.
+선택 문서 내보내기와 Golden 복원 API는 [API.md](API.md)의 내보내기 작업·Golden 이력 항목을 참고한다. 선택 사항인 브라우저 회귀 검사는 Playwright와 Chromium을 설치한 환경에서 `python scripts/verify_editor_save.py`, `python scripts/verify_golden_history.py`, `python scripts/verify_export_ui.py`, `python scripts/verify_frontend_audit.py`, `python scripts/verify_image_rotation.py`로 실행한다.
 
 ## 테스트용 더미 번들
 
@@ -145,7 +145,7 @@ docker compose down                  # 앱 데이터와 DB 볼륨 보존
 
 ### 메타데이터 마이그레이션
 
-레거시 `/data` 파일은 그대로 두고 번들 상태, Golden 변경 기록, 내보내기 작업 메타데이터를 PostgreSQL 로 가져온다. 파일 JSON 은 idempotent 로 건너뛰므로 앱을 멈춘 상태에서 재실행할 수 있다. 먼저 dry-run 으로 대상 경로를 확인한다.
+레거시 `/data` 파일은 그대로 두고 번들 상태, Golden 변경 기록, 내보내기 작업 메타데이터를 PostgreSQL 로 가져온다. 파일 JSON 은 idempotent 로 건너뛰므로 앱을 멈춘 상태에서 재실행할 수 있다. 먼저 dry-run 으로 이관 대상 파일 개수를 확인한다. dry-run은 파일 내용 무결성을 검사하지 않는다.
 
 ```bash
 # DB는 사전에 만들고, 이 환경에서 접속 가능한 주소를 사용한다.
@@ -225,3 +225,26 @@ deploy/k8s pvc · PostgreSQL StatefulSet/Service · app Deployment · build-bund
 `LABEL_VIEWER_DB_NAMESPACE`는 같은 데이터셋을 구분하는 키다. Compose와 Kubernetes 기본값은 `label-viewer`이다. 호스트에서 이관할 때도 같은 값을 설정한다. 서로 다른 데이터셋은 다른 값을 사용한다. 값이 없으면 데이터 디렉터리의 절대 경로를 사용하므로 `./storage`와 컨테이너 `/data`가 다른 namespace가 될 수 있다. 로컬 설정 파일은 namespace도 저장하며 명시적 환경변수가 우선한다.
 
 PostgreSQL 모드의 `/api/health`는 DB 연결을 확인하고 `{"ok":true,"storage":"postgresql"}`을 반환한다. DB 연결 실패 시 API는 503으로 응답하고 파일 상태로 대체하지 않는다. 연결 대기 기본값은 5초이며 `LABEL_VIEWER_DB_CONNECT_TIMEOUT` 또는 DSN의 `connect_timeout`으로 설정한다.
+
+### 이미지 보기 회전
+
+문서 상세 이미지 도구 모음의 `왼쪽으로 90도 회전`·`오른쪽으로 90도 회전` 버튼으로 방향을 바꾸고, 각도 표시 옆 `회전 초기화`로 0도로 돌아간다. 회전 후 페이지에 맞춰 표시하며 확대·드래그·너비 맞춤·bbox 근거와 미니맵도 회전 좌표를 따른다. 같은 문서 안에서 원본/전처리 이미지와 TIFF 페이지별로 각도를 기억한다. 각 이미지의 첫 진입은 0도이며, 다시 돌아오면 해당 이미지의 각도를 복원한다. 다른 문서로 이동하거나 새로고침하면 0도부터 시작한다. 보기 설정이며 원본 파일이나 OCR·Golden 좌표를 저장·변경하지 않는다.
+
+### PostgreSQL 연결 풀과 내보내기 성능
+
+DB 연결은 워커별 풀에서 재사용하며 요청의 중첩 DB 호출은 같은 트랜잭션을 사용한다. 기본값은 워커당 최소 0·최대 16개, 풀 대기 10초·대기 요청 최대 64개다. 두 워커라면 최대 32개 연결을 사용하므로 다른 앱의 사용량을 포함해 PostgreSQL 연결 한도를 잡는다. 풀 포화·DB 장애는 503으로 반환한다.
+
+| 환경변수 | 기본값 | 의미 |
+|---|---:|---|
+| `LABEL_VIEWER_DB_POOL_MIN_SIZE` | 0 | 워커별 최소 연결 수 |
+| `LABEL_VIEWER_DB_POOL_MAX_SIZE` | 16 | 워커별 최대 연결 수 |
+| `LABEL_VIEWER_DB_POOL_TIMEOUT` | 10 | 연결을 빌릴 때 대기 초 |
+| `LABEL_VIEWER_DB_POOL_MAX_WAITING` | 64 | 대기 요청 한도, 0이면 무제한 |
+| `LABEL_VIEWER_DB_POOL_MAX_IDLE` | 60 | 유휴 연결 정리 초 |
+| `LABEL_VIEWER_DB_POOL_MAX_LIFETIME` | 1800 | 연결 수명 초 |
+| `LABEL_VIEWER_DB_RECONNECT_TIMEOUT` | 30 | 풀 재연결 시도 기간 초 |
+| `LABEL_VIEWER_DB_POOL_WORKERS` | 2 | 풀 내부 연결 관리 스레드 수 |
+
+Excel은 시작 시 번들 검수·활성 상태를 한 번 조회하고, 진행률은 최대 초당 두 번 기록한다. Golden 현재본은 문서별 잠금으로 읽으며 내보내기 전체의 단일 시점 스냅샷은 아니다. DB 최초 가져오기 완료는 namespace별로 기록하므로 앱 재시작 시 오래된 파일 메타데이터를 다시 가져오지 않는다. 이후 추가 파일 가져오기는 앱을 멈춘 상태에서 마이그레이션 CLI를 명시적으로 실행한다.
+
+200건 Excel 반복 측정과 수정 범위는 [성능 개선·코드 점검·이미지 회전](wiki/2026-10-03-postgres-performance-audit.md)을 참고한다.

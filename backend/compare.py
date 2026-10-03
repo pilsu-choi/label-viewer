@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import difflib
+from decimal import Decimal
 from functools import partial
 from itertools import zip_longest
 import re
@@ -37,8 +38,12 @@ def norm(value: Any) -> str | None:
         return date
     cleaned = s.replace(",", "").replace("원", "")
     if _NUM_RE.fullmatch(cleaned):
-        f = float(cleaned)
-        return str(int(f)) if f == int(f) else repr(f)
+        # Do not round large identifiers or high precision amounts through float.
+        number = Decimal(cleaned)
+        if number.is_zero():
+            return "0"
+        rendered = format(number, "f")
+        return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
     return s
 
 

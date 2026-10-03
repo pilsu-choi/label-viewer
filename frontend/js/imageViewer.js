@@ -1,19 +1,24 @@
 import { el, clear } from './util.js';
 
 // 확대/축소·드래그 팬·bbox 오버레이·미니맵을 갖춘 이미지 뷰어. stage 엘리먼트 하나에 마운트한다.
-export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
+export function createImageViewer(stage, { onZoomChange, onRotationChange, focusMode } = {}) {
   const canvas = el('div', { class: 'viewer-canvas' });
+  const rotatedContent = el('div', { class: 'viewer-rotated-content' });
   const bboxLayer = el('div', { class: 'bbox-layer' });
-  canvas.appendChild(bboxLayer);
+  Object.assign(bboxLayer.style, { position: 'absolute', left: '0', top: '0' });
+  rotatedContent.appendChild(bboxLayer);
+  canvas.appendChild(rotatedContent);
   stage.appendChild(canvas);
 
+  const minimapContent = el('div', { class: 'mm-rotated-content' });
   const minimapImg = el('img', { alt: '' });
   const minimapBoxes = el('div', { class: 'mm-boxes' });
   const minimapViewport = el('div', { class: 'mm-viewport' });
-  const minimapEl = el('div', { class: 'minimap' }, [minimapImg, minimapBoxes, minimapViewport]);
+  minimapContent.append(minimapImg, minimapBoxes);
+  const minimapEl = el('div', { class: 'minimap' }, [minimapContent, minimapViewport]);
   stage.appendChild(minimapEl);
 
-  let scale = 1, tx = 0, ty = 0, natW = 0, natH = 0, imgEl = null;
+  let scale = 1, tx = 0, ty = 0, natW = 0, natH = 0, imgEl = null, rotation = 0;
   let pendingBoxes = [], focusView = null;
   let mode = focusMode === 'locate' ? 'locate' : 'zoom';
   // fitMode: 'page' | 'width' | 'manual' — stage 크기 변화(스플리터 드래그·윈도우 리사이즈·패널 접기/펼치기) 시
@@ -21,28 +26,49 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   let fitMode = 'page';
   let prevStageW = 0, prevStageH = 0;
 
+  function viewWidth() { return rotation % 180 ? natH : natW; }
+  function viewHeight() { return rotation % 180 ? natW : natH; }
+  function layoutRotation() {
+    const w = viewWidth(), h = viewHeight();
+    canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+    rotatedContent.style.width = `${natW}px`; rotatedContent.style.height = `${natH}px`;
+    rotatedContent.style.left = `${w / 2}px`; rotatedContent.style.top = `${h / 2}px`;
+    rotatedContent.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
+    layoutMinimap();
+  }
+  function layoutMinimap() {
+    if (!natW) return;
+    const s = Math.min(160 / viewWidth(), 200 / viewHeight());
+    minimapEl.style.width = `${viewWidth() * s}px`; minimapEl.style.height = `${viewHeight() * s}px`;
+    minimapContent.style.width = `${natW * s}px`; minimapContent.style.height = `${natH * s}px`;
+    minimapContent.style.left = '50%'; minimapContent.style.top = '50%';
+    minimapContent.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
+  }
   function apply() { canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; if (onZoomChange) onZoomChange(scale); updateMinimap(); }
 
   function updateMinimap() {
     if (!natW) { minimapEl.classList.remove('visible'); return; }
     const stageW = stage.clientWidth, stageH = stage.clientHeight;
-    const fullyVisible = tx >= -0.5 && ty >= -0.5 && tx + natW * scale <= stageW + 0.5 && ty + natH * scale <= stageH + 0.5;
+    const vw = viewWidth(), vh = viewHeight();
+    const fullyVisible = tx >= -0.5 && ty >= -0.5 && tx + vw * scale <= stageW + 0.5 && ty + vh * scale <= stageH + 0.5;
     minimapEl.classList.toggle('visible', !fullyVisible);
-    const vx0 = Math.max(0, -tx / scale) / natW, vy0 = Math.max(0, -ty / scale) / natH;
-    const vx1 = Math.min(natW, (stageW - tx) / scale) / natW, vy1 = Math.min(natH, (stageH - ty) / scale) / natH;
+    const vx0 = Math.max(0, -tx / scale) / vw, vy0 = Math.max(0, -ty / scale) / vh;
+    const vx1 = Math.min(vw, (stageW - tx) / scale) / vw, vy1 = Math.min(vh, (stageH - ty) / scale) / vh;
     Object.assign(minimapViewport.style, { left: `${vx0 * 100}%`, top: `${vy0 * 100}%`, width: `${Math.max(0, vx1 - vx0) * 100}%`, height: `${Math.max(0, vy1 - vy0) * 100}%` });
   }
 
   function minimapPanTo(e) {
     const rect = minimapEl.getBoundingClientRect();
     const fx = (e.clientX - rect.left) / rect.width, fy = (e.clientY - rect.top) / rect.height;
-    tx = stage.clientWidth / 2 - fx * natW * scale;
-    ty = stage.clientHeight / 2 - fy * natH * scale;
+    tx = stage.clientWidth / 2 - fx * viewWidth() * scale;
+    ty = stage.clientHeight / 2 - fy * viewHeight() * scale;
     apply();
   }
   let mmDragging = false;
-  minimapEl.addEventListener('mousedown', (e) => { e.stopPropagation(); mmDragging = true; minimapPanTo(e); });
-  minimapEl.addEventListener('wheel', (e) => e.stopPropagation());
+  const onMmDown = (e) => { e.stopPropagation(); mmDragging = true; minimapPanTo(e); };
+  const onMmWheel = (e) => e.stopPropagation();
+  minimapEl.addEventListener('mousedown', onMmDown);
+  minimapEl.addEventListener('wheel', onMmWheel);
   const onMmMove = (e) => { if (mmDragging) minimapPanTo(e); };
   const onMmUp = () => { mmDragging = false; };
   window.addEventListener('mousemove', onMmMove);
@@ -67,7 +93,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   function fitWidth() {
     if (!natW) return;
     fitMode = 'width';
-    scale = Math.max(0.02, (stage.clientWidth - PAGE_MARGIN * 2) / natW);
+    scale = Math.max(0.02, (stage.clientWidth - PAGE_MARGIN * 2) / viewWidth());
     tx = PAGE_MARGIN; ty = PAGE_MARGIN;
     apply();
   }
@@ -75,9 +101,9 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   function fitPage() {
     if (!natW) return;
     fitMode = 'page';
-    scale = Math.max(0.02, Math.min((stage.clientWidth - PAGE_MARGIN * 2) / natW, (stage.clientHeight - PAGE_MARGIN * 2) / natH));
-    tx = (stage.clientWidth - natW * scale) / 2;
-    ty = (stage.clientHeight - natH * scale) / 2;
+    scale = Math.max(0.02, Math.min((stage.clientWidth - PAGE_MARGIN * 2) / viewWidth(), (stage.clientHeight - PAGE_MARGIN * 2) / viewHeight()));
+    tx = (stage.clientWidth - viewWidth() * scale) / 2;
+    ty = (stage.clientHeight - viewHeight() * scale) / 2;
     apply();
   }
 
@@ -108,7 +134,7 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
   });
   resizeObserver.observe(stage);
 
-  let panning = false, lastX = 0, lastY = 0, panRAF = null, loadSeq = 0;
+  let panning = false, lastX = 0, lastY = 0, panRAF = null, loadSeq = 0, destroyed = false;
   const onMouseDown = (e) => {
     if (e.button !== 0) return;
     panning = true; lastX = e.clientX; lastY = e.clientY;
@@ -135,16 +161,16 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
       const img = new Image();
       img.alt = '';
       img.onload = () => {
-        if (seq !== loadSeq) return resolve(null);
+        if (destroyed || seq !== loadSeq) return resolve(null);
         natW = img.naturalWidth; natH = img.naturalHeight;
-        canvas.style.width = natW + 'px'; canvas.style.height = natH + 'px';
+        layoutRotation();
         bboxLayer.style.width = natW + 'px'; bboxLayer.style.height = natH + 'px';
         if (imgEl) imgEl.remove();
         imgEl = img;
-        canvas.insertBefore(img, bboxLayer);
+        img.style.position = 'absolute'; img.style.left = '0'; img.style.top = '0';
+        rotatedContent.insertBefore(img, bboxLayer);
         minimapImg.src = url;
-        const s = Math.min(160 / natW, 200 / natH);
-        minimapEl.style.width = `${natW * s}px`; minimapEl.style.height = `${natH * s}px`;
+        layoutMinimap();
         fitPage();
         setBoxes(pendingBoxes);
         resolve({ width: natW, height: natH });
@@ -171,6 +197,24 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
 
   function setFocusMode(m) { mode = m === 'locate' ? 'locate' : 'zoom'; }
 
+  function orientedBox(b) {
+    if (rotation === 90) return { x: 1 - b.y - b.h, y: b.x, w: b.h, h: b.w };
+    if (rotation === 180) return { x: 1 - b.x - b.w, y: 1 - b.y - b.h, w: b.w, h: b.h };
+    if (rotation === 270) return { x: b.y, y: 1 - b.x - b.w, w: b.h, h: b.w };
+    return b;
+  }
+
+  function rotateBy(degrees) {
+    if (!natW) { rotation = (rotation + degrees + 360) % 360; if (onRotationChange) onRotationChange(rotation); return rotation; }
+    rotation = (rotation + degrees + 360) % 360;
+    focusView = null;
+    layoutRotation();
+    drawBoxes();
+    fitPage();
+    if (onRotationChange) onRotationChange(rotation);
+    return rotation;
+  }
+
   // 화면 밖으로 벗어난 bbox를 배율 변경 없이 화면 안으로 살짝 옮긴다.
   function panIntoView(bx0, by0, bx1, by1) {
     const stageW = stage.clientWidth, stageH = stage.clientHeight, m = 24;
@@ -189,18 +233,19 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
     if (!boxes || !boxes.length || !natW) { clearFocus(); return; }
     if (!focusView) focusView = { scale, tx, ty };
     setBoxes(boxes);
-    const x = Math.min(...boxes.map((b) => b.x));
-    const y = Math.min(...boxes.map((b) => b.y));
-    const right = Math.max(...boxes.map((b) => b.x + b.w));
-    const bottom = Math.max(...boxes.map((b) => b.y + b.h));
-    if (mode === 'locate') { panIntoView(x * natW, y * natH, right * natW, bottom * natH); return; }
-    const rectW = Math.max((right - x) * natW, 1);
-    const rectH = Math.max((bottom - y) * natH, 1);
+    const oriented = boxes.map(orientedBox);
+    const x = Math.min(...oriented.map((b) => b.x));
+    const y = Math.min(...oriented.map((b) => b.y));
+    const right = Math.max(...oriented.map((b) => b.x + b.w));
+    const bottom = Math.max(...oriented.map((b) => b.y + b.h));
+    if (mode === 'locate') { panIntoView(x * viewWidth(), y * viewHeight(), right * viewWidth(), bottom * viewHeight()); return; }
+    const rectW = Math.max((right - x) * viewWidth(), 1);
+    const rectH = Math.max((bottom - y) * viewHeight(), 1);
     const stageW = stage.clientWidth, stageH = stage.clientHeight;
     const fitScale = Math.min(stageW / (rectW * 1.5), stageH / (rectH * 1.8));
     scale = Math.min(8, Math.max(focusView.scale, Math.min(focusView.scale * 4, fitScale)));
-    tx = stageW / 2 - ((x + right) / 2) * natW * scale;
-    ty = stageH / 2 - ((y + bottom) / 2) * natH * scale;
+    tx = stageW / 2 - ((x + right) / 2) * viewWidth() * scale;
+    ty = stageH / 2 - ((y + bottom) / 2) * viewHeight() * scale;
     apply();
   }
 
@@ -230,14 +275,25 @@ export function createImageViewer(stage, { onZoomChange, focusMode } = {}) {
 
   return {
     load, setBoxes, focusBoxes, clearFocus, empty, setFocusMode,
+    rotateLeft: () => rotateBy(-90), rotateRight: () => rotateBy(90),
+    resetRotation: () => rotateBy((360 - rotation) % 360),
+    setRotation: (angle) => {
+      const target = ((Number(angle) % 360) + 360) % 360;
+      return rotateBy((target - rotation + 360) % 360);
+    },
+    getRotation: () => rotation,
     zoomIn: () => zoomAt(1.25), zoomOut: () => zoomAt(0.8), fitWidth, fitPage,
     getScale: () => scale,
     destroy: () => {
+      destroyed = true;
+      loadSeq++;
       resizeObserver.disconnect();
       if (resizeRAF) cancelAnimationFrame(resizeRAF);
       if (panRAF) cancelAnimationFrame(panRAF);
       window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('mousemove', onMmMove); window.removeEventListener('mouseup', onMmUp);
+      minimapEl.removeEventListener('mousedown', onMmDown); minimapEl.removeEventListener('wheel', onMmWheel);
+      stage.removeEventListener('mousedown', onMouseDown); stage.removeEventListener('wheel', onWheel);
     },
   };
 }
