@@ -33,7 +33,15 @@ function dispatch() {
     const m = hash.match(r.re);
     if (m) {
       const params = {};
-      r.keys.forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]); });
+      try {
+        r.keys.forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]); });
+      } catch (error) {
+        if (!(error instanceof URIError)) throw error;
+        current = '/';
+        history.replaceState(null, '', '#/');
+        routes[0].handler({});
+        return;
+      }
       r.handler(params);
       return;
     }

@@ -41,7 +41,7 @@ def _progress(progress: Callable[[int, int, str], None] | None,
 
 
 def _resolve_doc_ids(data_dir: Path, bundle_id: str, doc_id: str | None, scope: str,
-                     ids: list[str] | None) -> tuple[Path, list[str]]:
+                     ids: list[str] | None, *, state_snapshot: dict | None = None) -> tuple[Path, list[str]]:
     bdir = B.bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
         raise B.ApiError(404, "bundle not found")
@@ -65,7 +65,7 @@ def _resolve_doc_ids(data_dir: Path, bundle_id: str, doc_id: str | None, scope: 
             raise B.ApiError(404, f"document not found: {sorted(unknown)[:5]}")
         selected = set(ids)
         return bdir, [item for item in all_ids if item in selected]
-    return bdir, B.scope_doc_ids(data_dir, bundle_id, scope)
+    return bdir, B.scope_doc_ids(data_dir, bundle_id, scope, state_snapshot=state_snapshot)
 
 
 def export_bundle_zip(data_dir: Path, bundle_id: str, doc_id: str | None = None,
@@ -146,7 +146,12 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
                        progress: Callable[[int, int, str], None] | None = None,
                        cancel_check: Callable[[], bool] | None = None,
                        out: BinaryIO | None = None) -> bytes | None:
-    _, selected_ids = _resolve_doc_ids(data_dir, bundle_id, doc_id, scope, ids)
+    bdir = B.bundle_dir(data_dir, bundle_id)
+    if not bdir.is_dir():
+        raise B.ApiError(404, "bundle not found")
+    state_snapshot = B.load_state(bdir)
+    _, selected_ids = _resolve_doc_ids(data_dir, bundle_id, doc_id, scope, ids,
+                                       state_snapshot=state_snapshot)
 
     wb = Workbook()
     ws_summary = wb.active
@@ -178,7 +183,8 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
     _progress(progress, 0, total, "preparing")
     for completed, did in enumerate(selected_ids, 1):
         _checkpoint(cancel_check)
-        detail = B.doc_detail(data_dir, bundle_id, did)
+        detail = B.doc_detail(data_dir, bundle_id, did, state_snapshot=state_snapshot,
+                              include_pages=False)
         ao_sc, h_sc = detail["score"]["ao"], detail["score"]["harness"]
         cls = detail["classification"]
         row = [did, detail["doc_type"], *(_OX[cls[k]] for k in ("ao", "harness")), detail["review"] or "",
@@ -195,24 +201,29 @@ def export_golden_xlsx(data_dir: Path, bundle_id: str, doc_id: str | None = None
         golden = detail["golden"] or {}
         for doc_i, doc in enumerate(golden.get("documents") or []):
             for c in doc.get("extracted_fields") or []:
+                _checkpoint(cancel_check)
                 _append_row(ws_fields, [did, doc_i, "필드", "", c.get("key"), _cell_val(c.get("value")), c.get("dtype", "")])
             for g in doc.get("extracted_groups") or []:
                 for c in g.get("fields") or []:
+                    _checkpoint(cancel_check)
                     _append_row(ws_fields, [did, doc_i, "그룹", g.get("key"), c.get("key"), _cell_val(c.get("value")),
                                        c.get("dtype", "")])
             for t in doc.get("extracted_tables") or []:
+                _checkpoint(cancel_check)
                 headers = t.get("headers") or []
                 _append_row(ws_tables, [did, t.get("key")] + headers)
                 table_row += 1
                 for column in range(1, len(headers) + 3):
                     ws_tables.cell(row=table_row, column=column).font = Font(bold=True)
                 for r in t.get("rows") or []:
+                    _checkpoint(cancel_check)
                     cellmap = {c.get("key"): c for c in r}
                     _append_row(ws_tables, ["", ""] + [_cell_val((cellmap.get(h) or {}).get("value")) for h in headers])
                 table_row += len(t.get("rows") or []) + 1
                 _append_row(ws_tables, [])
 
         for r in detail["compare"]:
+            _checkpoint(cancel_check)
             _append_row(ws_compare, [did, r["path"], r["area"], r["container"], r["row"], r["key"],
                                 _cell_val(r["golden"]), _cell_val(r["ao"]), r["ao_status"],
                                 _cell_val(r["harness"]), r["harness_status"]])

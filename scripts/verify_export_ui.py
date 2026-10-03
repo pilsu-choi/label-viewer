@@ -125,6 +125,59 @@ async def main():
           if (reconnectStarts !== 1 || downloads.at(-1)?.filename !== 'reconnected.zip') throw new Error('status recheck created a new job');
           closeTask();
 
+          // An old ready response must not overwrite a completed cancellation.
+          let lateReady, oldReads = 0;
+          const beforeLate = downloads.length;
+          api.startExport = async () => ({id:'late-ready', state:'queued', completed:0, total:1});
+          api.getExport = () => { oldReads++; return new Promise(resolve => { lateReady = resolve; }); };
+          api.cancelExport = async () => ({id:'late-ready', state:'cancelled', completed:0, total:1});
+          startExport('b', {format:'zip'}, '늦은 응답 취소');
+          await wait(() => lateReady, 'late status request did not start');
+          clickText('.export-task button', '내보내기 취소');
+          await wait(() => statusText().includes('취소했습니다'), 'cancel response did not settle');
+          lateReady({id:'late-ready',state:'ready',completed:1,total:1,filename:'late.zip'});
+          await new Promise(resolve => setTimeout(resolve, 80));
+          if (!statusText().includes('취소했습니다') || downloads.length !== beforeLate) throw new Error('late ready response undid cancellation');
+          closeTask();
+
+          // Repeated reconnect clicks must share one pending status request/download.
+          let retryReads = 0, retryReady;
+          const beforeReconnect = downloads.length;
+          api.startExport = async () => ({id:'double-reconnect',state:'queued',completed:0,total:1});
+          api.getExport = async () => {
+            retryReads++;
+            if (retryReads === 1) throw new Error('disconnect');
+            return new Promise(resolve => { retryReady = resolve; });
+          };
+          startExport('b', {format:'zip'}, '중복 상태 확인');
+          await wait(() => panel()?.textContent.includes('상태 다시 확인'), 'no reconnect button');
+          const retryButton = clickText('.export-task button', '상태 다시 확인');
+          retryButton.click();
+          if (retryReads !== 2) throw new Error('reconnect launched concurrent status requests');
+          retryReady({id:'double-reconnect',state:'ready',completed:1,total:1,filename:'once.zip'});
+          await wait(() => statusText().includes('파일 준비 완료'), 'reconnect did not finish');
+          if (downloads.length !== beforeReconnect + 1) throw new Error('reconnect downloaded twice');
+          closeTask();
+
+          // Reconnecting after a failed cancel must survive a still-pending old poll.
+          let pendingOldPoll, cancelRetryReads = 0;
+          api.startExport = async () => ({id:'cancel-reconnect',state:'running',completed:0,total:1});
+          api.getExport = async () => {
+            cancelRetryReads++;
+            if (cancelRetryReads === 1) return new Promise(resolve => { pendingOldPoll = resolve; });
+            return {id:'cancel-reconnect',state:'ready',completed:1,total:1,filename:'cancel-reconnect.zip'};
+          };
+          api.cancelExport = async () => { throw new Error('cancel disconnected'); };
+          startExport('b', {format:'zip'}, '취소 연결 복구');
+          await wait(() => pendingOldPoll, 'old status poll did not start');
+          clickText('.export-task button', '내보내기 취소');
+          await wait(() => panel()?.textContent.includes('상태 다시 확인'), 'failed cancel missing reconnect');
+          clickText('.export-task button', '상태 다시 확인');
+          pendingOldPoll({id:'cancel-reconnect',state:'running',completed:0,total:1});
+          await wait(() => statusText().includes('파일 준비 완료'), 'reconnect was lost behind stale poll');
+          if (cancelRetryReads !== 2) throw new Error('failed cancel reconnect did not resume one poll');
+          closeTask();
+
           // Select across the first and second page, then export exactly those IDs.
           const { renderList } = await import('/frontend/js/list.js');
           localStorage.setItem('lv.pageSize', '50');

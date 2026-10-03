@@ -25,7 +25,12 @@ services:
     container_name: label-viewer
     restart: unless-stopped
     environment:
-      LABEL_VIEWER_DATABASE_URL: postgresql://${LABEL_VIEWER_DB_USER:-label_viewer}:${LABEL_VIEWER_DB_PASSWORD:?Set LABEL_VIEWER_DB_PASSWORD in .env}@postgres:5432/${LABEL_VIEWER_DB_NAME:-label_viewer}
+      LABEL_VIEWER_DATABASE_URL: postgresql:///
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${LABEL_VIEWER_DB_NAME:-label_viewer}
+      PGUSER: ${LABEL_VIEWER_DB_USER:-label_viewer}
+      PGPASSWORD: ${LABEL_VIEWER_DB_PASSWORD:?Set LABEL_VIEWER_DB_PASSWORD in .env}
       LABEL_VIEWER_DB_NAMESPACE: ${LABEL_VIEWER_DB_NAMESPACE:-label-viewer}
       LABEL_VIEWER_MAX_UPLOAD_MB: ${LABEL_VIEWER_MAX_UPLOAD_MB:-2048}
     depends_on:

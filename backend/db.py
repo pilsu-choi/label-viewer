@@ -3,16 +3,22 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
-import json
+import math
 import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 
-_CURRENT_CONNECTION: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
+_CURRENT_CONNECTION: contextvars.ContextVar[tuple[int, Any] | None] = contextvars.ContextVar(
     "label_viewer_db_connection", default=None
 )
+_POOL_LOCK = threading.RLock()
+_POOL: Any | None = None
+_POOL_PID: int | None = None
+_POOL_KEY: tuple | None = None
+_FORKED_POOL_REFS: list[Any] = []
 
 
 def enabled() -> bool:
@@ -39,7 +45,7 @@ def _psycopg():
         raise RuntimeError("PostgreSQL is configured but psycopg is not installed") from exc
 
 
-def _connect(psycopg, url: str, autocommit: bool = False):
+def _connect_options(psycopg, url: str) -> dict[str, Any]:
     options = psycopg.conninfo.conninfo_to_dict(url)
     if "connect_timeout" not in options:
         try:
@@ -49,25 +55,150 @@ def _connect(psycopg, url: str, autocommit: bool = False):
         if timeout <= 0:
             raise ValueError("LABEL_VIEWER_DB_CONNECT_TIMEOUT must be a positive integer")
         options["connect_timeout"] = timeout
-    return psycopg.connect(**options, autocommit=autocommit)
+    return options
+
+
+def _positive_int(name: str, default: int, minimum: int = 1) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer >= {minimum}") from exc
+    if value < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}")
+    return value
+
+
+def _positive_float(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    return value
+
+
+def _pool_options(psycopg, url: str) -> tuple[dict[str, Any], dict[str, Any], tuple]:
+    kwargs = _connect_options(psycopg, url)
+    min_size = _positive_int("LABEL_VIEWER_DB_POOL_MIN_SIZE", 0, 0)
+    max_size = _positive_int("LABEL_VIEWER_DB_POOL_MAX_SIZE", 16)
+    if min_size > max_size:
+        raise ValueError("LABEL_VIEWER_DB_POOL_MIN_SIZE cannot exceed LABEL_VIEWER_DB_POOL_MAX_SIZE")
+    timeout = _positive_float("LABEL_VIEWER_DB_POOL_TIMEOUT", 10.0)
+    max_waiting = _positive_int("LABEL_VIEWER_DB_POOL_MAX_WAITING", 64, 0)
+    max_idle = _positive_float("LABEL_VIEWER_DB_POOL_MAX_IDLE", 60.0)
+    max_lifetime = _positive_float("LABEL_VIEWER_DB_POOL_MAX_LIFETIME", 1800.0)
+    settings = {
+        "min_size": min_size,
+        "max_size": max_size,
+        "timeout": timeout,
+        "max_waiting": max_waiting,
+        "max_idle": max_idle,
+        "max_lifetime": max_lifetime,
+        "reconnect_timeout": _positive_float("LABEL_VIEWER_DB_RECONNECT_TIMEOUT", 30.0),
+        "num_workers": _positive_int("LABEL_VIEWER_DB_POOL_WORKERS", 2),
+    }
+    # libpq also reads PG* variables from the process environment (including
+    # PGHOST/PGPORT/PGUSER/PGPASSWORD when the URL is just
+    # postgresql:///db). Include them in the in-memory pool identity so a
+    # runtime config change cannot keep handing out connections to the old
+    # server or credentials. Values are never logged or exposed.
+    pg_environment = tuple(sorted(
+        (name, value) for name, value in os.environ.items()
+        if name.startswith("PG")
+    ))
+    key = (url, tuple(sorted(kwargs.items())), pg_environment,
+           tuple(sorted(settings.items())))
+    return kwargs, settings, key
+
+
+def _after_fork_child() -> None:
+    """Discard inherited pool state; a forked worker must create its own pool."""
+    global _POOL_LOCK, _POOL, _POOL_PID, _POOL_KEY
+    if _POOL is not None:
+        # Keep the inherited object alive: its worker threads vanished at fork,
+        # and closing its sockets could send protocol data into the parent's pool.
+        _FORKED_POOL_REFS.append(_POOL)
+    _POOL = None
+    _POOL_PID = None
+    _POOL_KEY = None
+    _POOL_LOCK = threading.RLock()
+    _CURRENT_CONNECTION.set(None)
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_after_fork_child)
+
+
+def _pool_for_current_process():
+    global _POOL, _POOL_PID, _POOL_KEY
+    psycopg = _psycopg()
+    try:
+        from psycopg_pool import ConnectionPool
+    except ImportError as exc:
+        raise RuntimeError("PostgreSQL is configured but psycopg_pool is not installed") from exc
+    url = _database_url()
+    kwargs, settings, key = _pool_options(psycopg, url)
+    pid = os.getpid()
+    with _POOL_LOCK:
+        if _POOL is not None and _POOL_PID == pid and _POOL_KEY == key:
+            return _POOL
+        if _POOL is not None:
+            old_pool, old_pid = _POOL, _POOL_PID
+            _POOL = None
+            _POOL_PID = None
+            _POOL_KEY = None
+            if old_pid == pid:
+                old_pool.close()
+            else:
+                _FORKED_POOL_REFS.append(old_pool)
+        pool = ConnectionPool(
+            conninfo="",
+            kwargs=kwargs,
+            open=False,
+            check=ConnectionPool.check_connection,
+            **settings,
+        )
+        pool.open(wait=False)
+        _POOL, _POOL_PID, _POOL_KEY = pool, pid, key
+        return pool
+
+
+def _pool_timeout() -> float:
+    return _positive_float("LABEL_VIEWER_DB_POOL_TIMEOUT", 10.0)
+
+
+def close_pool() -> None:
+    """Close this process's pool. Safe to call repeatedly during application shutdown."""
+    global _POOL, _POOL_PID, _POOL_KEY
+    pid = os.getpid()
+    with _POOL_LOCK:
+        if _POOL is None or _POOL_PID != pid:
+            return
+        pool = _POOL
+        _POOL = None
+        _POOL_PID = None
+        _POOL_KEY = None
+    pool.close(timeout=5.0)
 
 
 @contextmanager
 def connection() -> Iterator[Any]:
     """Yield a transaction connection; nested calls reuse the current connection."""
     current = _CURRENT_CONNECTION.get()
-    if current is not None:
-        yield current
+    pid = os.getpid()
+    if current is not None and current[0] == pid:
+        yield current[1]
         return
-    psycopg = _psycopg()
-    conn = _connect(psycopg, _database_url())
-    token = _CURRENT_CONNECTION.set(conn)
-    try:
-        with conn.transaction():
+    if current is not None:
+        _CURRENT_CONNECTION.set(None)
+    pool = _pool_for_current_process()
+    with pool.connection(timeout=_pool_timeout()) as conn:
+        token = _CURRENT_CONNECTION.set((pid, conn))
+        try:
             yield conn
-    finally:
-        _CURRENT_CONNECTION.reset(token)
-        conn.close()
+        finally:
+            _CURRENT_CONNECTION.reset(token)
 
 
 def _lock_keys(data_dir: Path, resource: str) -> tuple[int, int]:
@@ -106,35 +237,54 @@ def lock(data_dir: Path, resource: str, shared: bool = False,
 @contextmanager
 def session_lock(data_dir: Path, resource: str, shared: bool = False,
                  blocking: bool = True) -> Iterator[bool]:
-    """Hold a session advisory lock on a dedicated connection, independent of CRUD transactions."""
+    """Hold a session advisory lock on a pooled checkout, independent of CRUD transactions."""
     if not enabled():
         yield True
         return
     key1, key2 = _lock_keys(data_dir, resource)
-    conn = _connect(_psycopg(), _database_url(), autocommit=True)
-    try:
-        if shared:
-            if blocking:
-                conn.execute("SELECT pg_advisory_lock_shared(%s, %s)", (key1, key2))
-                acquired = True
-            else:
-                acquired = bool(conn.execute("SELECT pg_try_advisory_lock_shared(%s, %s)",
-                                             (key1, key2)).fetchone()[0])
-        else:
-            if blocking:
-                conn.execute("SELECT pg_advisory_lock(%s, %s)", (key1, key2))
-                acquired = True
-            else:
-                acquired = bool(conn.execute("SELECT pg_try_advisory_lock(%s, %s)",
-                                             (key1, key2)).fetchone()[0])
+    pool = _pool_for_current_process()
+    with pool.connection(timeout=_pool_timeout()) as conn:
+        previous_autocommit = conn.autocommit
+        conn.autocommit = True
+        acquired = False
+        body_error: BaseException | None = None
         try:
+            if shared:
+                if blocking:
+                    conn.execute("SELECT pg_advisory_lock_shared(%s, %s)", (key1, key2))
+                    acquired = True
+                else:
+                    acquired = bool(conn.execute("SELECT pg_try_advisory_lock_shared(%s, %s)",
+                                                 (key1, key2)).fetchone()[0])
+            else:
+                if blocking:
+                    conn.execute("SELECT pg_advisory_lock(%s, %s)", (key1, key2))
+                    acquired = True
+                else:
+                    acquired = bool(conn.execute("SELECT pg_try_advisory_lock(%s, %s)",
+                                                 (key1, key2)).fetchone()[0])
             yield acquired
+        except BaseException as exc:
+            body_error = exc
+            raise
         finally:
             if acquired:
                 unlock = "pg_advisory_unlock_shared" if shared else "pg_advisory_unlock"
-                conn.execute(f"SELECT {unlock}(%s, %s)", (key1, key2))
-    finally:
-        conn.close()
+                try:
+                    conn.execute(f"SELECT {unlock}(%s, %s)", (key1, key2))
+                except BaseException:
+                    # Closing the session is the only safe fallback if explicit
+                    # unlock fails; the pool discards closed connections.
+                    conn.close()
+                    if body_error is None:
+                        raise
+            if not conn.closed:
+                try:
+                    conn.autocommit = previous_autocommit
+                except BaseException:
+                    conn.close()
+                    if body_error is None:
+                        raise
 
 
 def initialize() -> None:
@@ -188,26 +338,41 @@ def initialize() -> None:
                 FOREIGN KEY (namespace, bundle_id) REFERENCES bundles(namespace, bundle_id) ON DELETE CASCADE
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS metadata_imports (
+                namespace TEXT PRIMARY KEY,
+                completed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
 
 
 def read_bundle_state(bdir: Path) -> dict:
     ns = namespace(bdir.parent.parent)
     with connection() as conn:
         row = conn.execute(
-            "SELECT name, created_at, extra FROM bundles WHERE namespace=%s AND bundle_id=%s",
+            """
+            SELECT b.name, b.created_at, b.extra,
+                   COALESCE((
+                       SELECT jsonb_object_agg(d.doc_id, d.review)
+                       FROM documents d
+                       WHERE d.namespace=b.namespace AND d.bundle_id=b.bundle_id AND d.review <> ''
+                   ), '{}'::jsonb) AS review,
+                   COALESCE((
+                       SELECT jsonb_agg(d.doc_id)
+                       FROM documents d
+                       WHERE d.namespace=b.namespace AND d.bundle_id=b.bundle_id AND NOT d.enabled
+                   ), '[]'::jsonb) AS disabled
+            FROM bundles b WHERE b.namespace=%s AND b.bundle_id=%s
+            """,
             (ns, bdir.name),
         ).fetchone()
         if row is None:
             raise RuntimeError(f"bundle metadata not found in PostgreSQL: {bdir.name}")
-        name, created_at, extra = row
-        docs = conn.execute(
-            "SELECT doc_id, review, enabled FROM documents WHERE namespace=%s AND bundle_id=%s",
-            (ns, bdir.name),
-        ).fetchall()
+        name, created_at, extra, review, disabled = row
     state = dict(extra or {})
     state.update(name=name, created_at=created_at)
-    state["review"] = {doc_id: review for doc_id, review, _enabled in docs if review}
-    state["disabled"] = [doc_id for doc_id, _review, is_enabled in docs if not is_enabled]
+    state["review"] = dict(review or {})
+    state["disabled"] = list(disabled or [])
     return state
 
 
@@ -227,14 +392,22 @@ def write_bundle_state(bdir: Path, state: dict) -> None:
             ON CONFLICT(namespace,bundle_id) DO UPDATE SET
               name=EXCLUDED.name, created_at=EXCLUDED.created_at, extra=EXCLUDED.extra
         """, (ns, bdir.name, name, created_at, psycopg.types.json.Jsonb(extra)))
-        conn.execute("DELETE FROM documents WHERE namespace=%s AND bundle_id=%s", (ns, bdir.name))
         doc_ids = set(review) | disabled
-        if doc_ids:
-            conn.cursor().executemany(
-                "INSERT INTO documents(namespace,bundle_id,doc_id,review,enabled) VALUES (%s,%s,%s,%s,%s)",
-                [(ns, bdir.name, doc_id, review.get(doc_id, ""), doc_id not in disabled)
-                 for doc_id in doc_ids],
-            )
+        rows = sorted(doc_ids)
+        conn.execute("""
+            DELETE FROM documents
+            WHERE namespace=%s AND bundle_id=%s AND NOT (doc_id = ANY(%s::text[]))
+        """, (ns, bdir.name, rows))
+        if rows:
+            conn.execute("""
+                INSERT INTO documents(namespace,bundle_id,doc_id,review,enabled)
+                SELECT %s,%s,incoming.doc_id,incoming.review,incoming.enabled
+                FROM unnest(%s::text[],%s::text[],%s::boolean[])
+                     AS incoming(doc_id,review,enabled)
+                ON CONFLICT(namespace,bundle_id,doc_id) DO UPDATE SET
+                    review=EXCLUDED.review, enabled=EXCLUDED.enabled
+            """, (ns, bdir.name, rows, [review.get(i, "") for i in rows],
+                  [i not in disabled for i in rows]))
 
 
 def update_bundle_state(bdir: Path, fn: Callable[[dict], None]) -> None:
@@ -291,3 +464,10 @@ def read_golden_history(data_dir: Path, bundle_id: str, doc_id: str, history_id:
     i, created, action, revision, raw = row
     return ({"id": i, "created_at": created, "action": action, "revision": revision,
              "has_golden": raw is not None}, raw)
+
+
+def pool_stats() -> dict[str, Any]:
+    """Return psycopg_pool counters for tests and local diagnostics."""
+    if not enabled():
+        return {}
+    return _pool_for_current_process().get_stats()

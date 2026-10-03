@@ -45,9 +45,12 @@ export function debounce(fn, ms) {
 
 export function fmtNumber(v) {
   if (v === '' || v == null) return '';
-  const n = Number(String(v).replace(/,/g, ''));
-  if (Number.isNaN(n)) return String(v);
-  return n.toLocaleString('ko-KR', { maximumFractionDigits: 6 });
+  const match = String(v).replace(/,/g, '').trim().match(/^([+-]?)(\d+)(?:\.(\d+))?$/);
+  if (!match) return String(v);
+  const whole = match[2].replace(/^0+(?=\d)/, '');
+  const fraction = (match[3] || '').replace(/0+$/, '');
+  const sign = match[1] === '-' && (whole !== '0' || fraction) ? '-' : '';
+  return sign + whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction ? '.' + fraction : '');
 }
 
 export function isNumericDtype(dtype) {
@@ -212,6 +215,8 @@ const ICONS = {
   upload: [['path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }], ['path', { d: 'M17 8l-5-5-5 5' }], ['path', { d: 'M12 3v12' }]],
   folder: 'M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z',
   'file-archive': [['path', { d: 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z' }], ['path', { d: 'M14 2v4a2 2 0 0 0 2 2h4' }], ['path', { d: 'M10 8h1M10 11h1M10 14h1' }], ['path', { d: 'M9 17h3v3h-3z' }]],
+  'rotate-cw': [['path', { d: 'M21 2v6h-6M21 8a9 9 0 1 0 2 6' }]],
+  'rotate-ccw': [['path', { d: 'M3 2v6h6M3 8a9 9 0 1 1-2 6' }]],
   'zoom-in': [['circle', { cx: 11, cy: 11, r: 8 }], ['path', { d: 'M21 21l-4.35-4.35' }], ['path', { d: 'M11 8v6M8 11h6' }]],
   'zoom-out': [['circle', { cx: 11, cy: 11, r: 8 }], ['path', { d: 'M21 21l-4.35-4.35' }], ['path', { d: 'M8 11h6' }]],
   maximize: 'M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3',

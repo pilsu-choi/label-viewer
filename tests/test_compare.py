@@ -104,3 +104,13 @@ def test_result_missing_later_document_is_not_scored():
     assert all(r["ao_status"] == "MATCH" for r in doc0)
     assert all(r["ao_status"] == "" for r in doc1)
     assert score(rows, "ao")["total"] == len(doc0)
+
+
+def test_numeric_comparison_preserves_large_integer_and_decimal_precision():
+    from backend.compare import norm
+    assert norm('9007199254740992') != norm('9007199254740993')
+    assert cell_status('int', '9007199254740992', '9007199254740993') == 'MISMATCH'
+    assert norm('0.123456789012345678901') != norm('0.123456789012345678902')
+    assert norm('1,234.5000원') == '1234.5'
+    assert norm('-0.000') == '0'
+    assert norm('9' * 4000) == '9' * 4000

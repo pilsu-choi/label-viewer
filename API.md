@@ -3,7 +3,7 @@
 서버: `python3 -m backend.app --data ./storage --port 8765` (FastAPI + uvicorn). `/` 는 `frontend/index.html`, `/static/*` 는 `frontend/` 를 서빙한다.
 `LABEL_VIEWER_DATABASE_URL` 이 설정되면 번들 상태, 문서 검수 상태, Golden 변경 기록, 내보내기 작업 메타데이터를 PostgreSQL 에 저장한다. 이미지·AO·Harness·Golden 원본 파일과 업로드 데이터는 계속 `DATA_DIR`(기본 `./storage`, 환경변수 `LABEL_VIEWER_DATA`) 아래 둔다. DB 모드가 아니면 기존 파일 상태와 테스트 동작을 유지한다.
 
-기존 데이터 디렉터리를 DB 모드로 전환할 때는 앱을 멈춘 다음 `scripts/migrate_postgres.py --data <DATA_DIR> --dry-run` 으로 점검하고 `LABEL_VIEWER_DATABASE_URL=... python scripts/migrate_postgres.py --data <DATA_DIR> --configure-local` 로 가져온다. `--configure-local` 은 다음 일반 실행이 사용할 DSN 과 namespace 를 `<DATA_DIR>/_database.json` 에 권한 `0600` 으로 저장한다. 마이그레이션은 기존 파일을 제거하지 않고, 이미 DB 에 있는 행을 덮어쓰지 않으므로 재실행해도 안전하다. `--export-files` 는 앱을 중단한 상태에서 DB 메타데이터를 파일로 되돌린다. DB 에서 계속 운영한 뒤 파일 모드로 돌아갈 때는 먼저 이 명령을 완료하고 `LABEL_VIEWER_DATABASE_URL` 과 `_database.json` 을 제거한다.
+기존 데이터 디렉터리를 DB 모드로 전환할 때는 앱을 멈춘 다음 `scripts/migrate_postgres.py --data <DATA_DIR> --dry-run` 으로 이관 대상 개수를 확인하고 `LABEL_VIEWER_DATABASE_URL=... python scripts/migrate_postgres.py --data <DATA_DIR> --configure-local` 로 가져온다. `--configure-local` 은 다음 일반 실행이 사용할 DSN 과 namespace 를 `<DATA_DIR>/_database.json` 에 권한 `0600` 으로 저장한다. 마이그레이션은 기존 파일을 제거하지 않고, 이미 DB 에 있는 행을 덮어쓰지 않으므로 재실행해도 안전하다. `--export-files` 는 앱을 중단한 상태에서 DB 메타데이터를 파일로 되돌린다. DB 에서 계속 운영한 뒤 파일 모드로 돌아갈 때는 먼저 이 명령을 완료하고 `LABEL_VIEWER_DATABASE_URL` 과 `_database.json` 을 제거한다.
 
 앱과 PostgreSQL 을 함께 백업한다. `/data` 파일만 또는 DB dump 만 복원하면 메타데이터와 파일이 어긋날 수 있다. Compose 예제와 복구 순서는 README 의 [백업과 복구](README.md#백업과-복구)를 따른다.
 
@@ -222,11 +222,11 @@ openpyxl. 시트:
 
 ### GET /api/bundles/{id}/exports/{job_id}
 
-동일한 작업 상태를 반환한다. `state`: queued/running/ready/cancelled/failed. `completed/total`은 처리 문서 수이며 `phase=finalizing` 동안 파일을 마무리한다. 문서 처리가 100%여도 ready가 되기 전에는 다운로드할 수 없다. 상태·취소 정보는 서버 워커가 공유한다.
+동일한 작업 상태를 반환한다. `state`: queued/running/ready/cancelled/failed. `completed/total`은 처리 문서 수이며 `phase=finalizing` 동안 파일을 마무리한다. 문서 처리가 100%여도 ready가 되기 전에는 다운로드할 수 없다. 상태·취소 정보는 서버 워커가 공유한다. 진행률 DB 기록은 최대 초당 두 번으로 묶으며 준비·마무리 단계는 즉시 기록한다.
 
 ### DELETE /api/bundles/{id}/exports/{job_id}
 
-취소를 요청하고 cancelled 상태를 반환한다. 생성 중 파일과 완료 파일을 삭제한다. XLSX 파일 마무리 단계의 실제 작업 중단은 저장이 반환된 뒤 확인될 수 있으며, 취소된 결과는 다운로드되지 않는다.
+취소를 요청하고 cancelled 상태를 반환한다. 생성 중 임시 파일은 정리한다. 이미 완성된 파일은 먼저 시작한 다운로드가 정상 완료되도록 24시간 정리 시점까지 보관하고, 취소 이후 새로운 다운로드는 차단한다. XLSX 파일 마무리 단계의 실제 작업 중단은 저장이 반환된 뒤 확인될 수 있으며, 취소된 결과는 다운로드되지 않는다.
 
 ### GET /api/bundles/{id}/exports/{job_id}/download
 
@@ -253,3 +253,5 @@ ready 작업의 파일을 attachment로 반환한다. 미완료·취소·실패�
 `LABEL_VIEWER_DB_NAMESPACE`는 같은 데이터셋을 구분하는 키다. Compose와 Kubernetes 기본값은 `label-viewer`이다. 호스트에서 이관할 때도 같은 값을 설정한다. 서로 다른 데이터셋은 다른 값을 사용한다. 값이 없으면 데이터 디렉터리의 절대 경로를 사용하므로 `./storage`와 컨테이너 `/data`가 다른 namespace가 될 수 있다. 로컬 설정 파일은 namespace도 저장하며 명시적 환경변수가 우선한다.
 
 PostgreSQL 모드의 `/api/health`는 DB 연결을 확인하고 `{"ok":true,"storage":"postgresql"}`을 반환한다. DB 연결 실패 시 API는 503으로 응답하고 파일 상태로 대체하지 않는다. 연결 대기 기본값은 5초이며 `LABEL_VIEWER_DB_CONNECT_TIMEOUT` 또는 DSN의 `connect_timeout`으로 설정한다.
+
+DB 연결 풀 기본값과 환경변수는 [README 연결 풀](README.md#postgresql-연결-풀과-내보내기-성능)을 참고한다. 최초 이관 완료는 `metadata_imports`에 namespace별로 기록하여 재시작 시 오래된 파일 작업을 되살리지 않는다. 명시적 마이그레이션 CLI는 계속 재실행할 수 있다.

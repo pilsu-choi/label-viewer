@@ -62,20 +62,22 @@ function bundleAnatomy() {
 }
 
 export function renderUpload(root) {
+  let destroyed = false;
   const state = { uploading: false, progress: 0, error: '', bundles: [] };
 
   const screen = el('div', { class: 'upload-screen' });
   mount(root, screen);
 
   function startUpload(fileList) {
+    if (state.uploading || destroyed) return;
     if (!fileList.length) { state.error = '업로드할 파일이 없습니다.'; draw(); return; }
     state.uploading = true; state.progress = 0; state.error = '';
     draw();
     const name = fileList.length === 1 && /\.zip$/i.test(fileList[0].relPath)
       ? fileList[0].relPath.replace(/\.zip$/i, '') : null;
     api.uploadBundle(fileList, name, (p) => { state.progress = p; drawProgressOnly(); })
-      .then((bundle) => { navigate(`#/b/${encodeURIComponent(bundle.id)}`); })
-      .catch((err) => { state.uploading = false; state.error = err.message || '업로드 실패'; draw(); });
+      .then((bundle) => { if (!destroyed) navigate(`#/b/${encodeURIComponent(bundle.id)}`); })
+      .catch((err) => { if (destroyed) return; state.uploading = false; state.error = err.message || '업로드 실패'; draw(); });
   }
 
   function drawProgressOnly() {
@@ -84,7 +86,7 @@ export function renderUpload(root) {
   }
 
   function loadBundles() {
-    api.listBundles().then((list) => { state.bundles = list; drawRecent(); }).catch(() => {});
+    api.listBundles().then((list) => { if (destroyed) return; state.bundles = list; drawRecent(); }).catch(() => {});
   }
 
   function deleteBundle(id, ev) {
@@ -174,4 +176,5 @@ export function renderUpload(root) {
 
   draw();
   loadBundles();
+  return () => { destroyed = true; };
 }

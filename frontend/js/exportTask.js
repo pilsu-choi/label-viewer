@@ -11,7 +11,7 @@ export function startExport(bundleId, options, label = '내보내기') {
     return;
   }
   current?.panel.remove();
-  const task = { bundleId, options, label, job: null, cancelling: false, started: Date.now(), timer: null };
+  const task = { bundleId, options, label, job: null, cancelling: false, started: Date.now(), timer: null, polling: false, repoll: false, pollGeneration: 0, downloadStarted: false };
   task.panel = el('section', { class: 'export-task', role: 'region', 'aria-label': '내보내기 진행 상태', tabindex: '-1' });
   current = task;
   document.body.appendChild(task.panel);
@@ -32,28 +32,45 @@ function fail(task, error) {
 
 async function poll(task) {
   if (current !== task || task.cancelling) return;
+  if (task.polling) { task.repoll = true; return; }
+  const generation = task.pollGeneration;
+  task.polling = true;
   try {
     task.connectionError = null;
-    task.job = await api.getExport(task.bundleId, task.job.id);
-    if (task.cancelling) return;
+    const job = await api.getExport(task.bundleId, task.job.id);
+    if (current !== task || task.cancelling || generation !== task.pollGeneration) return;
+    task.job = job;
     draw(task);
     if (task.job.state === 'ready') {
       clearInterval(task.timer);
-      downloadUrl(api.exportDownloadUrl(task.bundleId, task.job.id), task.job.filename);
+      if (!task.downloadStarted) {
+        task.downloadStarted = true;
+        downloadUrl(api.exportDownloadUrl(task.bundleId, task.job.id), task.job.filename);
+      }
     } else if (['failed', 'cancelled'].includes(task.job.state)) {
       clearInterval(task.timer);
     } else {
       setTimeout(() => poll(task), 500);
     }
   } catch (error) {
+    if (current !== task || generation !== task.pollGeneration) return;
     if ([404, 410].includes(error.status)) { fail(task, error); return; }
     task.connectionError = error.message;
     clearInterval(task.timer);
     draw(task);
+  } finally {
+    task.polling = false;
+    if (task.repoll) {
+      task.repoll = false;
+      if (current === task && active(task) && !task.cancelling && !task.connectionError) {
+        queueMicrotask(() => poll(task));
+      }
+    }
   }
 }
 
 async function cancel(task) {
+  task.pollGeneration += 1;
   task.cancelling = true;
   draw(task);
   if (!task.job?.id) return;
@@ -87,7 +104,7 @@ function draw(task) {
     task.connectionError && el('div', { class: 'error-block' }, task.connectionError),
     job?.message && el('div', { class: state === 'failed' ? 'error-block' : 'hint' }, job.message),
     el('div', { class: 'export-task-actions' }, [
-      task.connectionError && el('button', { class: 'btn sm', onclick: () => { task.connectionError = null; task.timer = setInterval(() => draw(task), 1000); poll(task); } }, '상태 다시 확인'),
+      task.connectionError && el('button', { class: 'btn sm', onclick: () => { task.connectionError = null; clearInterval(task.timer); task.timer = setInterval(() => draw(task), 1000); poll(task); } }, '상태 다시 확인'),
       busy && el('button', { class: 'btn sm', disabled: task.cancelling, onclick: () => cancel(task) }, '내보내기 취소'),
       state === 'ready' && el('a', { class: 'btn primary sm', href: api.exportDownloadUrl(task.bundleId, job.id), download: job.filename }, '다시 다운로드'),
       state === 'failed' && el('button', { class: 'btn sm', onclick: () => startExport(task.bundleId, task.options, task.label) }, '다시 시도'),

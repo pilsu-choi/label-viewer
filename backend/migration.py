@@ -34,7 +34,7 @@ def save_configuration(data_dir: Path) -> None:
 
 
 
-def import_files(data_dir: Path, dry_run: bool = False) -> dict:
+def import_files(data_dir: Path, dry_run: bool = False, *, only_if_needed: bool = False) -> dict:
     data_dir = Path(data_dir)
     counts = dict(bundles=0, history=0, jobs=0)
     bundles = sorted(p for p in (data_dir / 'bundles').glob('*') if p.is_dir() and not p.name.startswith('.'))
@@ -50,6 +50,8 @@ def import_files(data_dir: Path, dry_run: bool = False) -> dict:
     from psycopg.types.json import Jsonb
     ns = DB.namespace(data_dir)
     with DB.lock(data_dir, 'metadata-migration'), DB.connection() as conn:
+        if only_if_needed and conn.execute('SELECT 1 FROM metadata_imports WHERE namespace=%s', (ns,)).fetchone():
+            return counts
         for bdir in bundles:
             exists = conn.execute('SELECT 1 FROM bundles WHERE namespace=%s AND bundle_id=%s',
                                   (ns, bdir.name)).fetchone()
@@ -80,6 +82,7 @@ def import_files(data_dir: Path, dry_run: bool = False) -> dict:
             cur = conn.execute('INSERT INTO export_jobs(namespace,bundle_id,id,state) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING',
                                (ns, bid, jid, Jsonb(state)))
             counts['jobs'] += cur.rowcount
+        conn.execute('INSERT INTO metadata_imports(namespace) VALUES (%s) ON CONFLICT DO NOTHING', (ns,))
     return counts
 
 
@@ -95,15 +98,32 @@ def export_files(data_dir: Path) -> dict:
     from .golden_history import history_dir
     if not DB.enabled():
         raise RuntimeError('PostgreSQL configuration is required')
+    data_dir = Path(data_dir)
     counts = dict(bundles=0, history=0, jobs=0)
     ns = DB.namespace(data_dir)
     with DB.lock(data_dir, 'metadata-migration'), DB.connection() as conn:
-        bids = conn.execute('SELECT bundle_id FROM bundles WHERE namespace=%s', (ns,)).fetchall()
+        bids = conn.execute('SELECT bundle_id FROM bundles WHERE namespace=%s ORDER BY bundle_id', (ns,)).fetchall()
+        bundle_root = (data_dir / 'bundles').resolve()
+        bundle_exports = []
         for (bid,) in bids:
+            if (not isinstance(bid, str) or not bid or bid in ('.', '..')
+                    or '/' in bid or '\\' in bid or Path(bid).name != bid):
+                raise RuntimeError(f'Invalid bundle ID in PostgreSQL: {bid!r}')
             bdir = data_dir / 'bundles' / bid
             if not bdir.is_dir():
                 raise RuntimeError('Bundle files are missing; rollback aborted')
-            _write_json(bdir / '_state.json', DB.read_bundle_state(bdir))
+            try:
+                resolved = bdir.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise RuntimeError('Bundle files are missing; rollback aborted') from exc
+            if resolved.parent != bundle_root or resolved.name != bid:
+                raise RuntimeError(f'Bundle path is unsafe; rollback aborted: {bid!r}')
+            # Resolve every directory and read every state before the first
+            # write, so one missing bundle cannot leave earlier state files
+            # partially exported.
+            bundle_exports.append((resolved, DB.read_bundle_state(resolved)))
+        for bdir, state in bundle_exports:
+            _write_json(bdir / '_state.json', state)
             counts['bundles'] += 1
         for bid, doc_id, hid, created, action, revision, raw in conn.execute(
             'SELECT bundle_id,doc_id,id,created_at,action,revision,raw FROM golden_history WHERE namespace=%s', (ns,)):

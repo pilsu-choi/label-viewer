@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import asynccontextmanager
 import hashlib
 import mimetypes
 import os
@@ -63,10 +64,19 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     data_dir.mkdir(parents=True, exist_ok=True)
     M.configure_from_file(data_dir)
     if DB.enabled():
-        M.import_files(data_dir)
+        M.import_files(data_dir, only_if_needed=True)
     max_mb = max_upload_mb or int(os.environ.get("LABEL_VIEWER_MAX_UPLOAD_MB", "2048"))
 
-    app = FastAPI(title="Label Viewer")
+    @asynccontextmanager
+    async def lifespan(_app):
+        EJ.startup(data_dir)
+        try:
+            yield
+        finally:
+            await run_in_threadpool(EJ.shutdown, data_dir)
+            await run_in_threadpool(DB.close_pool)
+
+    app = FastAPI(title="Label Viewer", lifespan=lifespan)
     app.add_middleware(TextGZip, minimum_size=1024, compresslevel=6)
     app.state.data_dir = data_dir
     app.state.max_upload_bytes = max_mb * 1024 * 1024
@@ -89,10 +99,13 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     if DB.enabled():
         import psycopg
 
-        @app.exception_handler(psycopg.Error)
         async def database_error(_request, _error):
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=503, content={"detail": "데이터베이스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."})
+
+        from psycopg_pool import PoolTimeout, TooManyRequests
+        for error_type in (psycopg.Error, PoolTimeout, TooManyRequests):
+            app.add_exception_handler(error_type, database_error)
 
     @app.get("/api/health")
     def health():
@@ -117,7 +130,7 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
             bid = await run_in_threadpool(call, B.process_upload, data_dir, [(f.filename, f.file) for f in files], name, limit)
         finally:
             await form.close()
-        return call(B.bundle_view, data_dir, bid)
+        return await run_in_threadpool(call, B.bundle_view, data_dir, bid)
 
     @app.get("/api/bundles")
     def list_bundles():
@@ -147,11 +160,26 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     def get_raw(bundle_id: str, doc_id: str, kind: str):
         if kind not in B.JSON_KINDS:
             raise HTTPException(404, "unknown kind")
-        bdir = call(B.bundle_dir, data_dir, bundle_id)
-        path = B.find_kind_file(bdir, kind, doc_id)
-        if path is None:
-            raise HTTPException(404, "not found")
-        return Response(content=B.read_json_text(path), media_type="application/json")
+        def read():
+            B._safe_id(doc_id, "doc_id")
+            bdir = B.bundle_dir(data_dir, bundle_id)
+            if not bdir.is_dir():
+                raise B.ApiError(404, "bundle not found")
+            lock = (B._golden_lock(bdir, doc_id, shared=True) if kind == "golden"
+                    else B._bundle_lifecycle_lock(bdir, shared=True))
+            with lock:
+                if not bdir.is_dir():
+                    raise B.ApiError(404, "bundle not found")
+                path = B.find_kind_file(bdir, kind, doc_id)
+                if path is None:
+                    raise B.ApiError(404, "not found")
+                try:
+                    return B.read_json_text(path)
+                except FileNotFoundError:
+                    raise B.ApiError(404, "not found")
+                except UnicodeDecodeError:
+                    raise B.ApiError(422, "JSON 파일의 문자 인코딩을 읽을 수 없습니다.")
+        return Response(content=call(read), media_type="application/json")
 
     @app.post("/api/bundles/{bundle_id}/docs/{doc_id}/golden")
     async def post_golden(bundle_id: str, doc_id: str, request: Request):

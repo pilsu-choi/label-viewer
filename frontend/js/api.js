@@ -6,16 +6,27 @@ async function req(method, url, body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(url, opts);
-  if (!res.ok) {
-    let detail = '';
-    try { const j = await res.json(); detail = j.detail || j.error || JSON.stringify(j); } catch (e) { /* no body */ }
-    const err = new Error(detail || `${res.status} ${res.statusText}`);
-    err.status = res.status;
-    throw err;
-  }
-  if (res.status === 204) return null;
-  return res.json();
+  const controller = new AbortController();
+  opts.signal = controller.signal;
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch(url, opts);
+    if (!res.ok) {
+      let detail = '';
+      try { const j = await res.json(); detail = j.detail || j.error || JSON.stringify(j); } catch (e) { /* no body */ }
+      const err = new Error(detail || `${res.status} ${res.statusText}`);
+      err.status = res.status;
+      throw err;
+    }
+    if (res.status === 204) return null;
+    return await res.json();
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('요청 시간이 초과되었습니다. 처리 결과를 확인한 후 다시 시도해 주세요.');
+    }
+    throw error;
+  } finally { clearTimeout(timer); }
+
 }
 
 // 문서 간 이동마다 번들 목록을 다시 받지 않도록 마지막 번들만 기억한다. fresh 면 새로 받는다.
