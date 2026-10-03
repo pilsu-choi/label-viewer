@@ -129,7 +129,16 @@ storage/bundles/{bundle_id}/
 - 응답: `GET /api/bundles/{id}` 와 같음. 201.
 
 ### GET /api/bundles
-`[{"id","name","created_at","counts":{"docs":0,"golden":0,"reviewed":0,"error":0}}]` 최신순.
+`[{"id","name","created_at","counts":{"docs":0,"golden":0,"reviewed":0,"error":0}}]` 최신순. 선택적 `limit`(1~100)을 주면 서버에서 해당 개수만 집계해 반환한다. 홈은 `?limit=5`를 사용한다. 생략하면 기존 전체 배열 계약을 유지한다.
+
+### GET /api/bundles/page
+
+- `query`: 이름 또는 ID 부분 검색, 최대 200자. `%`, `_`는 문자로 검색한다.
+- `sort`: `newest`(기본), `oldest`, `name`.
+- `page`: 1부터, 기본 1. 범위를 넘으면 마지막 페이지로 맞춘다.
+- `page_size`: 1~100, 기본 50.
+- 응답: `{"items":[...번들 요약...],"total":15,"filtered_total":3,"page":1,"page_size":50}`. `total`은 전체 수, `filtered_total`은 검색 결과 수다. 빈 결과의 page는 1이다.
+- 잘못된 매개변수는 422. 서버는 검색·정렬·페이지 범위를 정한 뒤 선택된 번들만 집계한다.
 
 ### DELETE /api/bundles/{id}
 번들 폴더 삭제. 204.

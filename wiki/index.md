@@ -53,3 +53,5 @@ status: active
 - [PostgreSQL 성능 개선·코드 점검·이미지 회전](2026-10-03-postgres-performance-audit.md)
 
 - [최근 번들 조회 지연 원인 조사](2026-10-03-recent-bundles-diagnosis.md)
+
+- [최근 번들·전체 목록 조회 성능 개선](2026-10-03-bundle-list-performance.md)

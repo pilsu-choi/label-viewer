@@ -33,7 +33,17 @@ async function req(method, url, body) {
 let bundleCache = null;
 
 export const api = {
-  listBundles: () => req('GET', '/api/bundles'),
+  listBundles(options) {
+    const query = options && options.limit != null ? `?${new URLSearchParams({ limit: String(options.limit) })}` : '';
+    return req('GET', `/api/bundles${query}`);
+  },
+  listBundlePage(options = {}) {
+    const params = new URLSearchParams(Object.entries({
+      query: options.query ?? '', sort: options.sort ?? 'newest',
+      page: options.page ?? 1, page_size: options.page_size ?? 50,
+    }).map(([key, value]) => [key, String(value)]));
+    return req('GET', `/api/bundles/page?${params}`);
+  },
   getBundle(id, fresh) {
     if (fresh || bundleCache?.id !== id) {
       const p = req('GET', `/api/bundles/${encodeURIComponent(id)}`);

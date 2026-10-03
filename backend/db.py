@@ -315,6 +315,16 @@ def initialize() -> None:
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS bundle_summaries (
+                namespace TEXT NOT NULL,
+                bundle_id TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                counts JSONB NOT NULL,
+                PRIMARY KEY (namespace, bundle_id),
+                FOREIGN KEY (namespace, bundle_id) REFERENCES bundles(namespace, bundle_id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS golden_history (
                 namespace TEXT NOT NULL,
                 bundle_id TEXT NOT NULL,
@@ -374,6 +384,85 @@ def read_bundle_state(bdir: Path) -> dict:
     state["review"] = dict(review or {})
     state["disabled"] = list(disabled or [])
     return state
+
+
+def list_bundle_metadata(data_dir: Path, *, query: str = "", sort: str = "newest",
+                         offset: int = 0, limit: int | None = None) -> tuple[int, int, list[dict]]:
+    """Fetch bundle metadata/review in one query; counts are maintained separately."""
+    if sort not in ("newest", "oldest", "name"):
+        raise ValueError("unsupported bundle sort")
+    ns = namespace(data_dir)
+    needle = str(query or "").lower()
+    escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    ordering = {
+        "newest": "created_at DESC, bundle_id ASC",
+        "oldest": "created_at ASC, bundle_id ASC",
+        "name": "lower(name) COLLATE \"C\" ASC, name COLLATE \"C\" ASC, bundle_id COLLATE \"C\" ASC",
+    }[sort]
+    with connection() as conn:
+        rows = conn.execute(f"""
+            WITH all_rows AS (
+                SELECT b.bundle_id, b.name, b.created_at
+                FROM bundles b WHERE b.namespace=%s
+            ), filtered AS (
+                SELECT * FROM all_rows
+                WHERE %s='' OR lower(name) LIKE %s ESCAPE E'\\\\'
+                             OR lower(bundle_id) LIKE %s ESCAPE E'\\\\'
+            ), totals AS (
+                SELECT (SELECT count(*) FROM all_rows) AS total,
+                       (SELECT count(*) FROM filtered) AS filtered_total
+            )
+            SELECT totals.total, totals.filtered_total,
+                   page.bundle_id, page.name, page.created_at,
+                   COALESCE(review.review, '{{}}'::jsonb)
+            FROM totals
+            LEFT JOIN LATERAL (
+                SELECT * FROM filtered ORDER BY {ordering} LIMIT %s OFFSET %s
+            ) AS page ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT jsonb_object_agg(d.doc_id, d.review)
+                           FILTER (WHERE d.review <> '') AS review
+                FROM documents d
+                WHERE d.namespace=%s AND d.bundle_id=page.bundle_id
+            ) AS review ON page.bundle_id IS NOT NULL
+            ORDER BY {ordering}
+        """, (ns, needle, pattern, pattern, limit, offset, ns)).fetchall()
+    total = int(rows[0][0]) if rows else 0
+    filtered_total = int(rows[0][1]) if rows else 0
+    items = [{"id": bid, "name": name, "created_at": created, "review": dict(review or {})}
+             for _total, _filtered_total, bid, name, created, review in rows if bid is not None]
+    return total, filtered_total, items
+
+
+def get_bundle_summaries(data_dir: Path, bundle_ids: list[str]) -> dict[str, dict]:
+    if not bundle_ids:
+        return {}
+    with connection() as conn:
+        rows = conn.execute("""
+            SELECT bundle_id, fingerprint, counts FROM bundle_summaries
+            WHERE namespace=%s AND bundle_id = ANY(%s::text[])
+        """, (namespace(data_dir), bundle_ids)).fetchall()
+    return {bid: {"fingerprint": fingerprint, "counts": dict(counts or {})}
+            for bid, fingerprint, counts in rows}
+
+
+def save_bundle_summaries(data_dir: Path, summaries: dict[str, dict]) -> None:
+    if not summaries:
+        return
+    psycopg = _psycopg()
+    ns = namespace(data_dir)
+    with connection() as conn:
+        conn.cursor().executemany("""
+            INSERT INTO bundle_summaries(namespace,bundle_id,fingerprint,counts)
+            SELECT %s,%s,%s,%s
+            WHERE EXISTS (
+                SELECT 1 FROM bundles WHERE namespace=%s AND bundle_id=%s
+            )
+            ON CONFLICT(namespace,bundle_id) DO UPDATE SET
+                fingerprint=EXCLUDED.fingerprint, counts=EXCLUDED.counts
+        """, [(ns, bid, value["fingerprint"], psycopg.types.json.Jsonb(value["counts"]), ns, bid)
+              for bid, value in summaries.items()])
 
 
 def write_bundle_state(bdir: Path, state: dict) -> None:

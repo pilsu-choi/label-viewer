@@ -197,3 +197,8 @@ status: active
 ## 2026-10-03 최근 번들 조회 조사
 
 - Creation: `2026-10-03-recent-bundles-diagnosis.md` — API·Chromium 실측, 캐시 유무별 JSON 1834개/84.6MiB 집계 병목과 개선 방향 기록.
+
+## 2026-10-03 번들 목록 성능 개선
+
+- Creation: `2026-10-03-bundle-list-performance.md` — 최근 5개·서버 검색/페이지, DB 집계 재사용 및 조회 상태 표시 구현·검증 기록.
+- Update: README/API에 limit·목록 페이지 API와 동작 설명.
