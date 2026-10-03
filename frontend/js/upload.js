@@ -63,7 +63,8 @@ function bundleAnatomy() {
 
 export function renderUpload(root) {
   let destroyed = false;
-  const state = { uploading: false, progress: 0, error: '', bundles: [] };
+  const state = { uploading: false, progress: 0, error: '', bundles: [], recentLoading: true, recentError: '' };
+  let recentGeneration = 0;
 
   const screen = el('div', { class: 'upload-screen' });
   mount(root, screen);
@@ -86,13 +87,26 @@ export function renderUpload(root) {
   }
 
   function loadBundles() {
-    api.listBundles().then((list) => { if (destroyed) return; state.bundles = list; drawRecent(); }).catch(() => {});
+    const generation = ++recentGeneration;
+    state.recentLoading = true; state.recentError = '';
+    drawRecent();
+    api.listBundles({ limit: 5 }).then((list) => {
+      if (destroyed || generation !== recentGeneration) return;
+      state.bundles = Array.isArray(list) ? list : [];
+      state.recentLoading = false;
+      drawRecent();
+    }).catch((err) => {
+      if (destroyed || generation !== recentGeneration) return;
+      state.recentLoading = false;
+      state.recentError = err.message || '네트워크 오류';
+      drawRecent();
+    });
   }
 
   function deleteBundle(id, ev) {
     ev.stopPropagation();
     if (!confirm('이 번들을 삭제할까요? 되돌릴 수 없습니다.')) return;
-    api.deleteBundle(id).then(() => { toast('번들을 삭제했습니다.'); loadBundles(); }).catch((e) => toast(e.message, 'error'));
+    api.deleteBundle(id).then(() => { if (destroyed) return; toast('번들을 삭제했습니다.'); loadBundles(); }).catch((e) => { if (!destroyed) toast(e.message, 'error'); });
   }
 
   let recentHost;
@@ -100,6 +114,17 @@ export function renderUpload(root) {
   function drawRecent() {
     if (!recentHost) return;
     clear(recentHost);
+    if (state.recentLoading) {
+      recentHost.appendChild(el('div', { class: 'loading-block', role: 'status' }, '최근 번들을 불러오는 중…'));
+      return;
+    }
+    if (state.recentError) {
+      recentHost.appendChild(el('div', { class: 'error-block', role: 'alert' }, [
+        el('div', {}, `최근 번들을 불러오지 못했습니다: ${state.recentError}`),
+        el('button', { class: 'btn sm', type: 'button', onclick: loadBundles }, '다시 시도'),
+      ]));
+      return;
+    }
     if (!state.bundles.length) {
       recentHost.appendChild(el('div', { class: 'empty' }, [
         icon('folder'),

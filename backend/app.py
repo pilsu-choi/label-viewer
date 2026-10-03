@@ -7,10 +7,10 @@ import hashlib
 import mimetypes
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
@@ -133,8 +133,15 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
         return await run_in_threadpool(call, B.bundle_view, data_dir, bid)
 
     @app.get("/api/bundles")
-    def list_bundles():
-        return call(B.list_bundles, data_dir)
+    def list_bundles(limit: Optional[int] = Query(default=None, ge=1, le=100)):
+        return call(B.list_bundles, data_dir, limit=limit)
+
+    @app.get("/api/bundles/page")
+    def bundle_page(query: str = Query(default="", max_length=200),
+                    sort: Literal["newest", "oldest", "name"] = "newest",
+                    page: int = Query(default=1, ge=1),
+                    page_size: int = Query(default=50, ge=1, le=100)):
+        return call(B.bundle_page, data_dir, query=query, sort=sort, page=page, page_size=page_size)
 
     @app.delete("/api/bundles/{bundle_id}", status_code=204)
     def delete_bundle(bundle_id: str):

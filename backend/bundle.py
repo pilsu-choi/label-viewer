@@ -146,6 +146,9 @@ _MEMO_MAX = 4096
 # 문서 요약은 작고 번들 화면마다 전부 쓰인다. 파싱 JSON 캐시와 나눠야 수천 건 번들에서 서로 밀어내지 않는다
 _SUM_MEMO: dict = {}
 _SUM_MEMO_MAX = 50_000
+_BUNDLE_SUMMARY_MEMO: dict[str, dict] = {}
+_BUNDLE_SUMMARY_MEMO_MAX = 4096
+_BUNDLE_SUMMARY_VERSION = 1  # Increment when summary counting/parsing semantics change.
 _RACY_NS = 20_000_000  # mtime 이 방금 전이면 같은 tick 의 재기록을 못 알아볼 수 있어 키를 매번 다르게 한다
 
 
@@ -155,7 +158,7 @@ def _sig(p: Path) -> tuple | None:
     except OSError:
         return None
     racy = (time.monotonic_ns(),) if time.time_ns() - st.st_mtime_ns < _RACY_NS else ()
-    return (st.st_ino, st.st_mtime_ns, st.st_size, *racy)
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_mode, *racy)
 
 
 def _memo(key: tuple, fn: Callable[[], Any], store: dict = _MEMO, limit: int = _MEMO_MAX) -> Any:
@@ -749,40 +752,195 @@ def scope_doc_ids(data_dir: Path, bundle_id: str, scope: str, *,
     return [d for d in doc_ids(bdir) if (d in disabled) == (scope == "disabled")]
 
 
-def _bundle_counts(bdir: Path, review: dict) -> dict:
-    ids = doc_ids(bdir)
-    n_golden = n_reviewed = n_error = 0
-    for doc_id in ids:
-        n_golden += find_kind_file(bdir, "golden", doc_id) is not None
-        n_reviewed += review.get(doc_id) == "done"
-        kinds = (*CORE_JSON_KINDS, "ao_ui")
-        n_error += any(load_json_safe(find_kind_file(bdir, k, doc_id))[1] for k in kinds)
-    return {"docs": len(ids), "golden": n_golden, "reviewed": n_reviewed, "error": n_error}
-
-
-def list_bundles(data_dir: Path) -> list[dict]:
-    root = bundles_root(data_dir)
-    if not root.is_dir():
-        return []
-    out = []
-    for bdir in root.iterdir():
-        if not bdir.is_dir() or bdir.name.startswith("."):
+def _bundle_manifest(bdir: Path) -> tuple[str, list[str], list[str], dict[str, dict]]:
+    """Cheap cross-process fingerprint plus per-document JSON fingerprints."""
+    inventory = []
+    file_signatures: dict[str, dict[str, list[int] | None]] = {}
+    ids_set: set[str] = set()
+    for kind in (*DOC_KINDS, "ao_ui"):
+        directory = bdir / kind
+        try:
+            with os.scandir(directory) as entries:
+                for entry in sorted((e for e in entries if not e.name.startswith(".")), key=lambda e: e.name):
+                    try:
+                        st = entry.stat(follow_symlinks=True)
+                        sig = [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_mode]
+                        if time.time_ns() - st.st_mtime_ns < _RACY_NS:
+                            sig.append(time.monotonic_ns())
+                    except OSError:
+                        sig = None
+                    inventory.append([kind, entry.name, sig])
+                    file_signatures.setdefault(kind, {})[entry.name] = sig
+                    if kind in DOC_KINDS:
+                        ids_set.add(Path(entry.name).stem)
+        except OSError:
             continue
+
+    ids = sorted(ids_set, key=_natural_key)
+    golden_files = file_signatures.get("golden", {})
+    golden_ids = [doc_id for doc_id in ids if f"{doc_id}.json" in golden_files]
+    doc_fingerprints: dict[str, dict] = {}
+    for doc_id in ids:
+        doc_signatures = {}
+        for kind in (*CORE_JSON_KINDS, "ao_ui"):
+            doc_signatures[kind] = file_signatures.get(kind, {}).get(f"{doc_id}.json")
+        doc_fingerprints[doc_id] = doc_signatures
+    encoded = json.dumps([_BUNDLE_SUMMARY_VERSION, inventory], ensure_ascii=False,
+                        separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest(), ids, golden_ids, doc_fingerprints
+
+
+def _doc_has_json_error(bdir: Path, doc_id: str) -> bool:
+    for kind in (*CORE_JSON_KINDS, "ao_ui"):
+        if load_json_safe(find_kind_file(bdir, kind, doc_id))[1]:
+            return True
+    return False
+
+
+def _bundle_file_counts(bdir: Path, manifest: tuple[str, list[str], list[str], dict[str, dict]],
+                        previous: dict | None = None) -> dict:
+    _fingerprint, ids, golden_ids, doc_fingerprints = manifest
+    previous = previous or {}
+    if previous.get("version") != _BUNDLE_SUMMARY_VERSION:
+        previous = {}
+    old_fingerprints = previous.get("doc_fingerprints") or {}
+    old_errors = set(previous.get("error_ids") or [])
+    error_ids = []
+    for doc_id in ids:
+        if old_fingerprints.get(doc_id) == doc_fingerprints[doc_id]:
+            has_error = doc_id in old_errors
+        else:
+            has_error = _doc_has_json_error(bdir, doc_id)
+        if has_error:
+            error_ids.append(doc_id)
+    return {"version": _BUNDLE_SUMMARY_VERSION, "doc_ids": ids, "golden_ids": golden_ids,
+            "doc_fingerprints": doc_fingerprints, "error_ids": error_ids}
+
+
+def _public_bundle_counts(summary: dict, review: dict) -> dict:
+    ids = summary.get("doc_ids") or []
+    return {"docs": len(ids), "golden": len(summary.get("golden_ids") or []),
+            "reviewed": sum(review.get(doc_id) == "done" for doc_id in ids),
+            "error": len(summary.get("error_ids") or [])}
+
+
+def _bundle_metadata(data_dir: Path, *, query: str, sort: str,
+                     offset: int = 0, limit: int | None = None) -> tuple[int, int, list[dict]]:
+    if sort not in ("newest", "oldest", "name"):
+        raise ApiError(422, "sort must be one of newest, oldest, name")
+    if DB.enabled():
+        return DB.list_bundle_metadata(data_dir, query=query, sort=sort, offset=offset, limit=limit)
+    root = bundles_root(data_dir)
+    records = []
+    if root.is_dir():
+        for bdir in root.iterdir():
+            if not bdir.is_dir() or bdir.name.startswith("."):
+                continue
+            with _bundle_lifecycle_lock(bdir, shared=True):
+                if not bdir.is_dir():
+                    continue
+                state = load_state(bdir)
+                records.append({"id": bdir.name, "name": state.get("name", bdir.name),
+                                "created_at": state.get("created_at", ""),
+                                "review": state.get("review") or {}})
+    total = len(records)
+    needle = str(query or "").lower()
+    if needle:
+        records = [r for r in records if needle in (r["name"] or "").lower()
+                   or needle in r["id"].lower()]
+    filtered_total = len(records)
+    if sort == "newest":
+        records.sort(key=lambda r: r["id"])
+        records.sort(key=lambda r: r["created_at"], reverse=True)
+    elif sort == "oldest":
+        records.sort(key=lambda r: (r["created_at"], r["id"]))
+    else:
+        records.sort(key=lambda r: (r["name"].lower(), r["name"], r["id"]))
+    return total, filtered_total, records[offset:offset + limit if limit is not None else None]
+
+
+def _cached_bundle_counts(data_dir: Path, record: dict, cached: dict | None) -> tuple[dict, dict | None]:
+    bdir = bundle_dir(data_dir, record["id"])
+    if not bdir.is_dir():
+        return {}, None
+    previous = cached or _BUNDLE_SUMMARY_MEMO.get(str(bdir))
+    computed = None
+    for attempt in range(2):
         with _bundle_lifecycle_lock(bdir, shared=True):
             if not bdir.is_dir():
-                continue
-            state = load_state(bdir)
-            # 문서 파일 추가·삭제·교체는 kind 디렉터리 mtime 에, 검수 상태는 metadata 에 나타난다
-            state_sig = (_sig(bdir / "_state.json") if not DB.enabled()
-                         else tuple(sorted((state.get("review") or {}).items())))
-            sig = (*(_sig(bdir / k) for k in (*DOC_KINDS, "ao_ui")), state_sig,
-                   tuple(sorted(state.get("disabled") or [])) if DB.enabled() else ())
-            out.append({
-                "id": bdir.name, "name": state.get("name", bdir.name), "created_at": state.get("created_at", ""),
-                "counts": _memo(("counts", str(bdir), sig), lambda: _bundle_counts(bdir, state.get("review") or {})),
-            })
-    out.sort(key=lambda b: b["created_at"], reverse=True)
-    return out
+                return {}, None
+            manifest = _bundle_manifest(bdir)
+            fingerprint = manifest[0]
+            if previous and previous.get("fingerprint") == fingerprint:
+                summary = previous["counts"]
+                next_cache = previous
+            else:
+                summary = _bundle_file_counts(bdir, manifest, (previous or {}).get("counts"))
+                computed = {"fingerprint": fingerprint, "counts": summary}
+                verified = _bundle_manifest(bdir)[0]
+                if verified == fingerprint:
+                    next_cache = computed
+                    # Keep the write under the lifecycle guard so exclusive deletion
+                    # cannot race it; a concurrent file change invalidates next time.
+                    if DB.enabled():
+                        DB.save_bundle_summaries(data_dir, {record["id"]: next_cache})
+                else:
+                    previous = computed
+                    if attempt == 0:
+                        continue
+                    next_cache = None  # Do not publish a summary built during concurrent file edits.
+            counts = _public_bundle_counts(summary, record.get("review") or {})
+            return counts, next_cache
+    return _public_bundle_counts((computed or {}).get("counts") or {}, record.get("review") or {}), None
+
+
+def _finish_bundle_records(data_dir: Path, records: list[dict]) -> list[dict]:
+    if not records:
+        return []
+    ids = [record["id"] for record in records]
+    cached = DB.get_bundle_summaries(data_dir, ids) if DB.enabled() else {}
+    output = []
+    for record in records:
+        bdir = bundle_dir(data_dir, record["id"])
+        if not bdir.is_dir():
+            continue
+        counts, next_cache = _cached_bundle_counts(data_dir, record, cached.get(record["id"]))
+        if not counts and not bdir.is_dir():
+            continue
+        output.append({"id": record["id"], "name": record["name"],
+                       "created_at": record["created_at"], "counts": counts})
+        if next_cache is not None:
+            if not DB.enabled():
+                if len(_BUNDLE_SUMMARY_MEMO) >= _BUNDLE_SUMMARY_MEMO_MAX:
+                    _BUNDLE_SUMMARY_MEMO.clear()
+                _BUNDLE_SUMMARY_MEMO[str(bdir)] = next_cache
+    return output
+
+
+def list_bundles(data_dir: Path, *, limit: int | None = None) -> list[dict]:
+    if limit is not None:
+        limit = max(0, int(limit))
+    _total, _filtered_total, records = _bundle_metadata(
+        data_dir, query="", sort="newest", offset=0, limit=limit)
+    return _finish_bundle_records(data_dir, records)
+
+
+def bundle_page(data_dir: Path, *, query: str = "", sort: str = "newest",
+                page: int = 1, page_size: int = 50) -> dict:
+    page = max(1, int(page))
+    page_size = max(1, min(int(page_size), 100))
+    offset = (page - 1) * page_size
+    total, filtered_total, records = _bundle_metadata(
+        data_dir, query=query, sort=sort, offset=offset, limit=page_size)
+    last_page = max(1, (filtered_total + page_size - 1) // page_size)
+    if page > last_page:
+        page = last_page
+        offset = (page - 1) * page_size
+        total, filtered_total, records = _bundle_metadata(
+            data_dir, query=query, sort=sort, offset=offset, limit=page_size)
+    items = _finish_bundle_records(data_dir, records)
+    return {"items": items, "total": total, "filtered_total": filtered_total,
+            "page": page, "page_size": page_size}
 
 
 @contextmanager
