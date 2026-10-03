@@ -202,3 +202,4 @@ status: active
 
 - Creation: `2026-10-03-bundle-list-performance.md` — 최근 5개·서버 검색/페이지, DB 집계 재사용 및 조회 상태 표시 구현·검증 기록.
 - Update: README/API에 limit·목록 페이지 API와 동작 설명.
+- Update: 실제 서버 최근 20.1ms·전체 48.5ms, 홈/전체 목록 확인 및 작업 중 감지한 별도 Golden 변경 사실 기록.
