@@ -51,3 +51,5 @@ status: active
 - [PostgreSQL 메타데이터 저장 도입](2026-10-03-postgresql.md)
 
 - [PostgreSQL 성능 개선·코드 점검·이미지 회전](2026-10-03-postgres-performance-audit.md)
+
+- [최근 번들 조회 지연 원인 조사](2026-10-03-recent-bundles-diagnosis.md)
