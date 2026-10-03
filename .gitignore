@@ -8,3 +8,6 @@ storage/
 deploy/aws/.env.aws
 deploy/aws/.tunnel.pid
 dist/
+
+.env
+.env.local

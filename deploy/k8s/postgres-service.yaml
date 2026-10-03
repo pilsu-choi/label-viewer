@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: label-viewer-postgres
+  labels:
+    app: label-viewer
+    app.kubernetes.io/component: database
+spec:
+  clusterIP: None
+  selector:
+    app: label-viewer-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

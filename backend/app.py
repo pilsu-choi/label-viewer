@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from . import bundle as B
 from . import export as E
 from . import export_jobs as EJ
+from . import db as DB
+from . import migration as M
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 NO_CACHE = {"Cache-Control": "no-cache"}  # 배포 뒤 예전 JS 모듈을 쓰지 않도록 매번 재검증
@@ -59,6 +61,9 @@ def _static_version() -> str:
 def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
+    M.configure_from_file(data_dir)
+    if DB.enabled():
+        M.import_files(data_dir)
     max_mb = max_upload_mb or int(os.environ.get("LABEL_VIEWER_MAX_UPLOAD_MB", "2048"))
 
     app = FastAPI(title="Label Viewer")
@@ -81,9 +86,20 @@ def create_app(data_dir: Path, max_upload_mb: Optional[int] = None) -> FastAPI:
         except B.ApiError as e:
             raise HTTPException(status_code=e.status, detail=e.message)
 
+    if DB.enabled():
+        import psycopg
+
+        @app.exception_handler(psycopg.Error)
+        async def database_error(_request, _error):
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=503, content={"detail": "데이터베이스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."})
+
     @app.get("/api/health")
     def health():
-        return {"ok": True}
+        if DB.enabled():
+            with DB.connection() as conn:
+                conn.execute("SELECT 1")
+        return {"ok": True, "storage": "postgresql"} if DB.enabled() else {"ok": True}
 
     @app.post("/api/bundles", status_code=201)
     async def upload_bundle(request: Request):
@@ -253,6 +269,7 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=int(os.environ.get("LABEL_VIEWER_WORKERS", "2")))
     args = parser.parse_args()
 
+    M.configure_from_file(Path(args.data))
     import uvicorn
     os.environ["LABEL_VIEWER_DATA"] = args.data
     uvicorn.run("backend.app:app_from_env", factory=True, host=args.host, port=args.port, workers=args.workers)

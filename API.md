@@ -1,9 +1,38 @@
 # API 계약
 
 서버: `python3 -m backend.app --data ./storage --port 8765` (FastAPI + uvicorn). `/` 는 `frontend/index.html`, `/static/*` 는 `frontend/` 를 서빙한다.
-DB 는 쓰지 않는다. 모든 상태는 `DATA_DIR`(기본 `./storage`, 환경변수 `LABEL_VIEWER_DATA`) 아래 파일이다.
+`LABEL_VIEWER_DATABASE_URL` 이 설정되면 번들 상태, 문서 검수 상태, Golden 변경 기록, 내보내기 작업 메타데이터를 PostgreSQL 에 저장한다. 이미지·AO·Harness·Golden 원본 파일과 업로드 데이터는 계속 `DATA_DIR`(기본 `./storage`, 환경변수 `LABEL_VIEWER_DATA`) 아래 둔다. DB 모드가 아니면 기존 파일 상태와 테스트 동작을 유지한다.
+
+기존 데이터 디렉터리를 DB 모드로 전환할 때는 앱을 멈춘 다음 `scripts/migrate_postgres.py --data <DATA_DIR> --dry-run` 으로 점검하고 `LABEL_VIEWER_DATABASE_URL=... python scripts/migrate_postgres.py --data <DATA_DIR> --configure-local` 로 가져온다. `--configure-local` 은 다음 일반 실행이 사용할 DSN 과 namespace 를 `<DATA_DIR>/_database.json` 에 권한 `0600` 으로 저장한다. 마이그레이션은 기존 파일을 제거하지 않고, 이미 DB 에 있는 행을 덮어쓰지 않으므로 재실행해도 안전하다. `--export-files` 는 앱을 중단한 상태에서 DB 메타데이터를 파일로 되돌린다. DB 에서 계속 운영한 뒤 파일 모드로 돌아갈 때는 먼저 이 명령을 완료하고 `LABEL_VIEWER_DATABASE_URL` 과 `_database.json` 을 제거한다.
+
+앱과 PostgreSQL 을 함께 백업한다. `/data` 파일만 또는 DB dump 만 복원하면 메타데이터와 파일이 어긋날 수 있다. Compose 예제와 복구 순서는 README 의 [백업과 복구](README.md#백업과-복구)를 따른다.
 
 ## 저장 구조
+
+```text
+storage/
+├── _database.json  # 선택적 PostgreSQL 로컬 설정(권한 0600)
+├── bundles/{bundle_id}/
+│   ├── original/      원본 이미지 (png/jpg/jpeg/tif/tiff/bmp/webp)
+│   ├── preprocessed/  전처리 이미지
+│   ├── ao_extract/    AO 추출 JSON 또는 UI response JSON (읽기 전용)
+│   ├── ao_ui/         선택적 bbox sidecar JSON (읽기 전용)
+│   ├── harness/       하네스 응답 JSON       (읽기 전용)
+│   ├── golden/        정답지 JSON           (유일한 편집 대상)
+│   └── _state.json    레거시/파일 모드 번들 이름·생성 시각·검수·비활성 정보
+└── .cache/export-jobs/  파일 모드 내보내기 작업 상태
+```
+
+PostgreSQL 모드의 핵심 테이블:
+
+| 테이블 | 내용 |
+| --- | --- |
+| `bundles` | 번들 이름·생성 시각 및 기타 상태 |
+| `documents` | 문서별 검수 상태와 활성 여부 |
+| `golden_history` | Golden 버전, revision, 생성 시각, 작업 |
+| `export_jobs` | 내보내기 작업 상태와 결과 위치 |
+
+파일 자체는 DB 에 넣지 않는다. Golden JSON 현재본은 `golden/` 에 두고, history 는 DB 에 스냅샷과 SHA-256 revision 을 저장한다. `_state.json` 은 DB 모드에서 정본이 아니며 migration/rollback 입력·출력으로 사용한다.
 
 ```text
 storage/bundles/{bundle_id}/
@@ -218,3 +247,9 @@ ready 작업의 파일을 attachment로 반환한다. 미완료·취소·실패�
 ### POST /api/bundles/{id}/docs/{doc_id}/golden/history/{history_id}/restore
 
 본문: `{"expected_revision":"..."}`(필수). 해당 기록의 Golden 또는 삭제 상태로 복원하고 새 restore 기록을 남긴다. 응답은 갱신된 문서 상세. 현재 내용이 달라졌으면 409, 기록이나 문서가 없으면 404, 잘못된 기록은 422. Golden만 있던 문서를 삭제한 뒤에도 이력에서 복원할 수 있다. 번들 자체 삭제 시 이력도 함께 삭제된다.
+
+### DB namespace
+
+`LABEL_VIEWER_DB_NAMESPACE`는 같은 데이터셋을 구분하는 키다. Compose와 Kubernetes 기본값은 `label-viewer`이다. 호스트에서 이관할 때도 같은 값을 설정한다. 서로 다른 데이터셋은 다른 값을 사용한다. 값이 없으면 데이터 디렉터리의 절대 경로를 사용하므로 `./storage`와 컨테이너 `/data`가 다른 namespace가 될 수 있다. 로컬 설정 파일은 namespace도 저장하며 명시적 환경변수가 우선한다.
+
+PostgreSQL 모드의 `/api/health`는 DB 연결을 확인하고 `{"ok":true,"storage":"postgresql"}`을 반환한다. DB 연결 실패 시 API는 503으로 응답하고 파일 상태로 대체하지 않는다. 연결 대기 기본값은 5초이며 `LABEL_VIEWER_DB_CONNECT_TIMEOUT` 또는 DSN의 `connect_timeout`으로 설정한다.

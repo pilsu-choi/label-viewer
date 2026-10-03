@@ -17,11 +17,13 @@ done
 need_root ${ARGS[@]+"${ARGS[@]}"}
 ensure_kube
 
-kubectl -n "$NS" delete deploy,svc -l app=label-viewer --ignore-not-found
+kubectl -n "$NS" delete deploy,statefulset,svc -l app=label-viewer --ignore-not-found
 if [ "$PURGE" = 1 ]; then
   kubectl -n "$NS" delete pvc -l app=label-viewer --ignore-not-found
   kubectl delete pv "$(pv_name "$NS")" --ignore-not-found
-  echo "✔ 삭제 완료 (PVC·PV 포함). local PV 디렉토리의 파일은 남아 있으니 필요하면 직접 지우십시오."
+  kubectl delete pv "$(postgres_pv_name "$NS")" --ignore-not-found
+  kubectl -n "$NS" delete secret label-viewer-postgres --ignore-not-found
+  echo "✔ 삭제 완료 (PVC·PV·Secret 포함). local PV 디렉터리의 파일은 직접 삭제하십시오."
 else
-  echo "✔ 삭제 완료 — 데이터(PVC·PV)는 남겼습니다. 지우려면 --purge."
+  echo "✔ 삭제 완료 — 데이터(PVC·PV)와 PostgreSQL Secret 은 남겼습니다. 지우려면 --purge."
 fi

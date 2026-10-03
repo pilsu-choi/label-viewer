@@ -1,6 +1,6 @@
 # label_viewer
 
-보험 OCR 결과(AO Extract·Harness)를 검수하고 정답지(Golden Set)를 만들고·고치고·비교·채점하는 독립 Web App이다. DB는 쓰지 않는다. 번들 폴더의 파일이 원본 데이터이고, 정답지도 JSON 파일로 저장한다.
+보험 OCR 결과(AO Extract·Harness)를 검수하고 정답지(Golden Set)를 만들고·고치고·비교·채점하는 독립 Web App이다. 운영 배포는 PostgreSQL 에 번들·문서 상태, Golden 이력, 내보내기 작업 메타데이터를 저장하고 파일 원본은 데이터 디렉터리에 둔다. PostgreSQL 없이 실행하는 로컬 개발·테스트 모드도 지원한다.
 
 흐름: 번들 업로드(폴더/ZIP) → 파일명 기준 자동 매칭 → 이미지 목록 → 정답지 생성·수정 → Golden/AO/Harness 비교 → 채점 → 전체 묶음 ZIP/Excel 내보내기
 
@@ -12,7 +12,7 @@ python3 -m backend.app --data ./storage --port 8765     # http://127.0.0.1:8765
 pip install -r requirements-dev.txt && python3 -m pytest tests -q
 ```
 
-환경변수: `LABEL_VIEWER_DATA`(데이터 경로, 기본 `./storage`), `LABEL_VIEWER_MAX_UPLOAD_MB`(기본 2048), `LABEL_VIEWER_WORKERS`(uvicorn 워커 수, 기본 2 — `--workers`로도 지정).
+환경변수: `LABEL_VIEWER_DATA`(데이터 경로, 기본 `./storage`), `LABEL_VIEWER_DATABASE_URL`(설정 시 PostgreSQL 메타데이터 모드), `LABEL_VIEWER_MAX_UPLOAD_MB`(기본 2048), `LABEL_VIEWER_WORKERS`(uvicorn 워커 수, 기본 2 — `--workers`로도 지정).
 
 ## 내보내기와 Golden 복원
 
@@ -131,20 +131,59 @@ bundle/
 
 ### Docker Compose
 
+Compose 는 PostgreSQL 17 과 앱을 함께 실행한다. DB 비밀번호는 최초 설치에서 로컬 `.env`에 생성한다. 이미 DB가 있으면 기존 `.env`와 비밀번호를 유지한다.
+
 ```bash
-docker compose up -d --build        # http://127.0.0.1:8765, 데이터는 볼륨 label-viewer_data(/data)
-docker compose logs -f              # 로그
-docker compose down                 # 정지(볼륨 보존, 삭제는 down -v)
+umask 077
+printf 'LABEL_VIEWER_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" > .env
+docker compose up -d --build --wait  # http://127.0.0.1:8765
+docker compose logs -f
+docker compose down                  # 앱 데이터와 DB 볼륨 보존
 ```
 
-`LABEL_VIEWER_BIND`(기본 `127.0.0.1`), `LABEL_VIEWER_PORT`(기본 8765), `LABEL_VIEWER_MAX_UPLOAD_MB`로 바꾼다. 앱에 인증이 없으므로 외부에 열 때는 접근 대역을 제한한다.
+`docker compose down -v` 는 `/data` 파일과 PostgreSQL 데이터를 모두 삭제하므로 백업 후에만 사용한다. `LABEL_VIEWER_BIND`(기본 `127.0.0.1`), `LABEL_VIEWER_PORT`(기본 8765), `LABEL_VIEWER_MAX_UPLOAD_MB`로 앱을 설정한다. 앱에 인증이 없으므로 외부에 열 때는 접근 대역을 제한한다.
+
+### 메타데이터 마이그레이션
+
+레거시 `/data` 파일은 그대로 두고 번들 상태, Golden 변경 기록, 내보내기 작업 메타데이터를 PostgreSQL 로 가져온다. 파일 JSON 은 idempotent 로 건너뛰므로 앱을 멈춘 상태에서 재실행할 수 있다. 먼저 dry-run 으로 대상 경로를 확인한다.
+
+```bash
+# DB는 사전에 만들고, 이 환경에서 접속 가능한 주소를 사용한다.
+export LABEL_VIEWER_DB_NAMESPACE=label-viewer
+export LABEL_VIEWER_DATABASE_URL='postgresql://label_viewer:<비밀번호>@<호스트>:5432/label_viewer'
+python3 scripts/migrate_postgres.py --data ./storage --dry-run
+python3 scripts/migrate_postgres.py --data ./storage --configure-local
+```
+
+`--configure-local` 은 DSN 을 `storage/_database.json` 에 권한 `0600` 으로 기록해, 같은 `DATA_DIR` 로 실행하는 일반 CLI 가 PostgreSQL 모드를 유지하게 한다. Compose 는 `LABEL_VIEWER_DATABASE_URL` 을 직접 주입하므로 이 파일을 사용하지 않는다. 기존 파일만 쓰는 개발·테스트는 DB 환경변수 없이 계속 실행할 수 있다. PostgreSQL 데이터가 생긴 뒤에는 DB URL 을 해제한 채 시작하지 않는다. 파일 모드로 되돌릴 때는 먼저 앱을 멈추고 아래 롤백 절차를 따른다.
+
+```bash
+LABEL_VIEWER_DATABASE_URL='postgresql://label_viewer:비밀번호@호스트:5432/label_viewer' \
+  python3 scripts/migrate_postgres.py --data ./storage --export-files
+# 파일 백업과 검증을 마친 뒤에만 DATABASE_URL / storage/_database.json 설정을 제거한다.
+```
+
+가져오기는 PostgreSQL 의 기존 행을 덮어쓰지 않고, `--export-files` 는 DB 의 현재 상태를 파일로 내보낸다. 두 작업은 앱을 정지한 상태에서 수행한다.
+
+### 백업과 복구
+
+백업에는 파일 아티팩트와 DB dump 가 모두 필요하다. 앱을 정지해 두 상태를 같은 시점으로 맞춘다.
+
+```bash
+docker compose stop label-viewer
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > label-viewer-db.sql
+docker compose run --rm --no-deps --entrypoint tar label-viewer -C /data -czf - . > label-viewer-files.tar.gz
+docker compose start label-viewer
+```
+
+복구도 앱을 멈춘 다음 `/data` 파일 백업과 `pg_dump` 를 함께 복원한다. 단일 볼륨 또는 DB 만 따로 복원하면 번들 파일·Golden 기록·내보내기 상태가 서로 맞지 않을 수 있다. Kubernetes 는 해당 스토리지의 PVC snapshot/복구 절차와 `pg_dump` 를 같은 점검 창에 수행한다.
 
 ### AWS 개발 서버
 
 harness-v2 개발 서버(EC2)에 같은 `docker-compose.yml`로 올린다. 로컬에서 이미지를 빌드해 `docker save`로 반입하고, 서버 루프백에만 바인딩한다.
 
 ```bash
-cp deploy/aws/.env.aws.example deploy/aws/.env.aws   # SSH_HOST·SSH_KEY 확인
+cp deploy/aws/.env.aws.example deploy/aws/.env.aws   # SSH_HOST·SSH_KEY 설정 후 LABEL_VIEWER_DB_PASSWORD 에 임의 비밀번호 기록
 deploy/aws/deploy.sh             # 빌드 → 전송 → 기동(헬스체크 대기). --no-build 는 전송·기동만
 deploy/aws/tunnel.sh --bg        # http://localhost:18765 → 서버 127.0.0.1:8765 (--stop 으로 종료)
 deploy/aws/logs.sh               # 로그
@@ -155,27 +194,24 @@ deploy/aws/down.sh               # 정지(볼륨 보존)
 
 ### Kubernetes
 
-```bash
-docker build -t label-viewer:latest .
-kubectl apply -k deploy/k8s          # PVC(/data) + Deployment(Recreate, uid 10001) + Service(NodePort 30920)
-```
+`deploy/k8s` 는 앱 데이터와 PostgreSQL 데이터용 PVC, PostgreSQL 17 StatefulSet·Service, 앱 Deployment 를 설치한다. 매니페스트는 비밀번호를 포함하지 않는다. 직접 `kubectl apply -k` 를 쓸 때는 먼저 네임스페이스에 `label-viewer-postgres` Secret 을 `password`, `database-url` 두 key 로 생성한다. 오프라인 번들 설치는 비밀번호를 안전하게 생성하고 Secret 을 적용한다.
 
-폐쇄망(레지스트리 없음)은 오프라인 번들로 반입한다. 설치·업그레이드·삭제는 번들의 `INSTALL.md` 참고.
+폐쇄망(레지스트리 없음)은 앱과 PostgreSQL 이미지를 모두 담은 번들로 반입한다. 기본 StorageClass 가 없을 때 `--local-pv` 는 앱 데이터 경로와 그 아래 `postgres/` 경로에 PVC 를 각각 만든다. 설치·업그레이드·삭제는 번들의 `INSTALL.md` 참고.
 
 ```bash
-deploy/k8s/build-bundle.sh [--tar] [출력디렉토리]   # → dist/label-viewer-k8s-<태그>/ (이미지 tar + 매니페스트 + install.sh)
+deploy/k8s/build-bundle.sh [--tar] [출력디렉토리]   # → dist/label-viewer-k8s-<태그>/ (앱·PostgreSQL 이미지 tar + 매니페스트 + install.sh)
 ```
 
 ## 구조
 
 ```text
-backend/   app.py(라우트) · bundle.py(업로드·매칭·저장) · doctype.py(문서 종류·템플릿·분류) · compare.py(정규화·비교·채점) · export.py(ZIP·Excel)
+backend/   app.py(라우트) · bundle.py(파일·문서 상태) · db.py(PostgreSQL) · migration.py(파일 전환) · doctype.py · compare.py · export.py(ZIP·Excel)
 frontend/  index.html · app.css · app.js · js/(upload·list·documentRail·detail·goldenEditor·compare·imageViewer·jsonViewer·reconstruct)
-scripts/   make_dummy_bundle.py(합성 자료) · make_dummy2.py(실제 E2E 자료) · make_doc_templates.py(정답 표본 → backend/doc_templates.json 양식 템플릿 생성)
+scripts/   migrate_postgres.py(파일 메타데이터 전환) · make_dummy_bundle.py · make_dummy2.py · make_doc_templates.py
 tests/     test_app.py
-docker-compose.yml  단일 컨테이너 배포(로컬·AWS 공용)
+docker-compose.yml  앱 + PostgreSQL 17 배포(로컬·AWS 공용)
 deploy/aws deploy · tunnel · logs · down (AWS 개발 서버)
-deploy/k8s pvc · deployment · service · kustomization · build-bundle.sh · bundle/(install·remove·INSTALL.md)
+deploy/k8s pvc · PostgreSQL StatefulSet/Service · app Deployment · build-bundle.sh · bundle/(install·remove·INSTALL.md)
 ```
 
 ## 보안
@@ -183,3 +219,9 @@ deploy/k8s pvc · deployment · service · kustomization · build-bundle.sh · b
 - 화면은 값을 `textContent`로만 넣고 `innerHTML`은 쓰지 않는다. 그래서 업로드한 값 안의 HTML·스크립트는 실행되지 않는다.
 - 재구성 보기의 HTML·Markdown 렌더러도 JSON을 바탕으로 DOM을 직접 만든다.
 - 업로드 경로는 검사한다. `..`, 절대 경로, zip slip은 거부한다.
+
+### DB namespace
+
+`LABEL_VIEWER_DB_NAMESPACE`는 같은 데이터셋을 구분하는 키다. Compose와 Kubernetes 기본값은 `label-viewer`이다. 호스트에서 이관할 때도 같은 값을 설정한다. 서로 다른 데이터셋은 다른 값을 사용한다. 값이 없으면 데이터 디렉터리의 절대 경로를 사용하므로 `./storage`와 컨테이너 `/data`가 다른 namespace가 될 수 있다. 로컬 설정 파일은 namespace도 저장하며 명시적 환경변수가 우선한다.
+
+PostgreSQL 모드의 `/api/health`는 DB 연결을 확인하고 `{"ok":true,"storage":"postgresql"}`을 반환한다. DB 연결 실패 시 API는 503으로 응답하고 파일 상태로 대체하지 않는다. 연결 대기 기본값은 5초이며 `LABEL_VIEWER_DB_CONNECT_TIMEOUT` 또는 DSN의 `connect_timeout`으로 설정한다.
