@@ -49,3 +49,14 @@ namespace는 이관·실행 환경에서 동일하게 설정한다. Compose/Kube
 - Docker 이미지 빌드, Compose 설정 검사, Kustomize 렌더링, 설치 shell 문법 검사 통과.
 - 임시 Docker 앱의 워커 2개에서 DB health·업로드·Golden 저장/이력·ZIP 생성/다운로드·번들 삭제 API 확인.
 - 테스트 경고는 기존 Starlette/httpx/anyio 및 테스트의 fork 사용에 관한 deprecation이다. 백그라운드 작업의 미처리 예외 경고는 삭제 경합 수정 후 사라졌다.
+
+## 로컬 반영 결과
+
+- dev 병합: `b1c52da` (기능 커밋 `f593b3a`). `http://localhost:8765`를 PostgreSQL 모드로 재시작했다.
+- 전용 컨테이너 `label-viewer-postgres`, PostgreSQL 17, 호스트 루프백 포트 `55432`, 영속 볼륨 `label-viewer-postgres-data`를 사용한다. 기존 Docraft DB는 변경하지 않았다.
+- namespace: `label-viewer`. 번들 15개, 문서 검수 상태 44건, 기존 내보내기 작업 1건 이관. 기존 Golden 이력은 0건이었다.
+- 이관 전후 번들 이름·집계·검수 상태·활성 상태가 일치하며 Golden 파일 1,172개 SHA-256이 일치했다.
+- 원래 문제 번들 `20261002-2241-5bf0`의 활성 200건 XLSX: queued → running → ready, **10.69초**, **2,597,017 bytes**. 다운로드와 ZIP 내부 무결성 검사 성공.
+- 이관 백업은 `storage/.backups/20261003-postgresql/`에 상태 파일 묶음, 이관 전 비교 정보, 이관 직후 PostgreSQL dump로 보존했다. 백업과 연결 정보는 권한 600, 비밀 디렉터리는 700으로 저장했다.
+- 앱 시작은 기존 `python -m backend.app --data ./storage --port 8765`를 사용한다. DB 컨테이너가 정지되었다면 먼저 `docker start label-viewer-postgres`를 실행한다. 컨테이너 재생성용 환경 파일은 `storage/.secrets/postgres-container.env`이다. 이 파일과 `_database.json`은 외부에 공개하지 않는다.
+- 현재 앱 로그는 `storage/.logs/postgresql-app.log`, 부모 PID 기록은 `storage/.server.pid`이다.
