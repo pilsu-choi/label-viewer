@@ -182,3 +182,8 @@ status: active
 
 ### Creation
 - [내보내기 진행률·선택 문서와 Golden 이력·충돌 감지](2026-10-03-review-tools.md): 추천 기능을 병렬로 구현하고 다중 워커 상태 공유·취소·선택·이력·복원·충돌을 검증(2026-10-03, `feat/review-tools`).
+
+## 2026-10-03 PostgreSQL
+
+- Creation: `2026-10-03-postgresql.md` — PostgreSQL 저장, 이관·롤백, 배포 구성과 검증 기록.
+- Update: README와 API 문서에 DB 실행·백업·장애 처리 안내 추가.

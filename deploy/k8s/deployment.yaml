@@ -16,6 +16,11 @@ spec:
       labels:
         app: label-viewer
     spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "until pg_isready -h label-viewer-postgres -U label_viewer -d label_viewer; do sleep 2; done"]
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -33,6 +38,13 @@ spec:
               value: /data
             - name: LABEL_VIEWER_MAX_UPLOAD_MB
               value: "2048"
+            - name: LABEL_VIEWER_DB_NAMESPACE
+              value: label-viewer
+            - name: LABEL_VIEWER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: label-viewer-postgres
+                  key: database-url
           volumeMounts:
             - name: data
               mountPath: /data

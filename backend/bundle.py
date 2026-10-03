@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import contextvars
 import fcntl
 import hashlib
 import json
@@ -13,6 +14,7 @@ import time
 import unicodedata
 import zipfile
 import zlib
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Callable
@@ -20,6 +22,7 @@ from typing import Any, BinaryIO, Callable
 from PIL import Image, ImageSequence
 
 from .compare import compare_bundle, harness_value, score
+from . import db as DB
 from .doctype import DOC_TYPES, apply_template, canon, classified, label
 from .golden_history import archive_snapshot, golden_revision, list_snapshots, read_snapshot
 
@@ -47,6 +50,10 @@ _STRIP_EXT = IMAGE_EXTS | {".json"}
 _STRIP_SUFFIX = {".answer", ".golden", ".harness", ".aiocr", ".ao", ".ui", ".draft"}
 _PAGE_RE = re.compile(r"\.p\d+$", re.I)
 _ID_RE = re.compile(r"^[^/\\\x00-\x1f]+$")  # 파일명에서 온 ID(한글·공백·괄호 포함). 경로 구분자·제어문자만 막는다
+
+_HELD_LIFECYCLE_LOCKS: contextvars.ContextVar[dict[tuple[str, str], str]] = contextvars.ContextVar(
+    "label_viewer_lifecycle_locks", default={}
+)
 
 
 class ApiError(Exception):
@@ -160,12 +167,17 @@ def bundle_dir(data_dir: Path, bundle_id: str) -> Path:
 
 def new_bundle_id() -> str:
     now = datetime.now()
-    return f"{now:%Y%m%d-%H%M}-{secrets.token_hex(2)}"
+    return f"{now:%Y%m%d-%H%M}-{secrets.token_hex(4)}"
 
 
 # ── 상태 ──────────────────────────────────────────────────────────────────
 
 def load_state(bdir: Path) -> dict:
+    if DB.enabled():
+        with _bundle_lifecycle_lock(bdir, shared=True):
+            if not bdir.is_dir():
+                raise ApiError(404, "bundle not found")
+            return DB.read_bundle_state(bdir)
     p = bdir / "_state.json"
     if not p.exists():
         return {"name": bdir.name, "created_at": "", "review": {}}
@@ -176,11 +188,21 @@ def load_state(bdir: Path) -> dict:
 
 
 def save_state(bdir: Path, state: dict) -> None:
+    if DB.enabled():
+        with _bundle_lifecycle_lock(bdir, shared=True):
+            DB.write_bundle_state(bdir, state)
+        return
     _atomic_write_json(bdir / "_state.json", state)
 
 
 def update_state(bdir: Path, fn: Callable[[dict], None]) -> None:
     """_state.json 읽기-수정-쓰기. 워커가 여럿이라 파일 잠금으로 동시 변경이 서로 덮어쓰지 않게 한다."""
+    if DB.enabled():
+        with _bundle_lifecycle_lock(bdir, shared=True):
+            if not bdir.is_dir():
+                raise ApiError(404, "bundle not found")
+            DB.update_bundle_state(bdir, fn)
+        return
     with open(bdir / ".state.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         state = load_state(bdir)
@@ -266,16 +288,33 @@ def _create_bundle(data_dir: Path, bundle_name: str, entries: list[tuple[str, An
 
     bid = new_bundle_id()
     bdir = bundle_dir(data_dir, bid)
-    bdir.mkdir(parents=True, exist_ok=True)
-    try:
-        _write_entries(bdir, entries, open_src)
-    except Exception as e:  # 실패한 업로드는 번들을 남기지 않는다
-        shutil.rmtree(bdir, ignore_errors=True)
-        if isinstance(e, OSError):
-            raise ApiError(400, f"파일을 저장하지 못했습니다(파일명이 너무 길 수 있음): {e.filename or e}")
-        raise
-
-    save_state(bdir, {"name": bundle_name, "created_at": datetime.now(timezone.utc).isoformat(), "review": {}})
+    root = bundles_root(data_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    with _bundle_lifecycle_lock(bdir):
+        if bdir.exists():
+            raise ApiError(409, "bundle id already exists")
+        staging = root / f".upload-{bid}-{secrets.token_hex(4)}"
+        staging.mkdir()
+        metadata_saved = False
+        try:
+            _write_entries(staging, entries, open_src)
+            state = {"name": bundle_name, "created_at": datetime.now(timezone.utc).isoformat(), "review": {}}
+            if DB.enabled():
+                save_state(bdir, state)
+                metadata_saved = True
+            else:
+                save_state(staging, state)
+            os.replace(staging, bdir)
+        except Exception as e:  # 실패한 업로드는 번들을 남기지 않는다
+            shutil.rmtree(staging, ignore_errors=True)
+            if metadata_saved:
+                try:
+                    DB.delete_bundle(data_dir, bid)
+                except Exception as cleanup_error:
+                    raise RuntimeError(f"bundle publish failed and metadata cleanup failed: {cleanup_error}") from e
+            if isinstance(e, OSError):
+                raise ApiError(400, f"파일을 저장하지 못했습니다(파일명이 너무 길 수 있음): {e.filename or e}")
+            raise
     return bid
 
 
@@ -556,8 +595,7 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str) -> dict:
     if not bdir.is_dir():
         raise ApiError(404, "bundle not found")
     _safe_id(doc_id, "doc_id")
-    with _golden_lock(bdir, doc_id) as lock:
-        fcntl.flock(lock, fcntl.LOCK_SH)
+    with _golden_lock(bdir, doc_id, shared=True):
         return _doc_detail_unlocked(data_dir, bundle_id, doc_id)
 
 
@@ -679,27 +717,84 @@ def list_bundles(data_dir: Path) -> list[dict]:
         return []
     out = []
     for bdir in root.iterdir():
-        if not bdir.is_dir():
+        if not bdir.is_dir() or bdir.name.startswith("."):
             continue
-        state = load_state(bdir)
-        # 문서 파일 추가·삭제·교체는 kind 디렉터리 mtime 에, 검수 상태는 _state.json 에 나타난다
-        sig = (*(_sig(bdir / k) for k in (*DOC_KINDS, "ao_ui")), _sig(bdir / "_state.json"))
-        out.append({
-            "id": bdir.name, "name": state.get("name", bdir.name), "created_at": state.get("created_at", ""),
-            "counts": _memo(("counts", str(bdir), sig), lambda: _bundle_counts(bdir, state.get("review") or {})),
-        })
+        with _bundle_lifecycle_lock(bdir, shared=True):
+            if not bdir.is_dir():
+                continue
+            state = load_state(bdir)
+            # 문서 파일 추가·삭제·교체는 kind 디렉터리 mtime 에, 검수 상태는 metadata 에 나타난다
+            state_sig = (_sig(bdir / "_state.json") if not DB.enabled()
+                         else tuple(sorted((state.get("review") or {}).items())))
+            sig = (*(_sig(bdir / k) for k in (*DOC_KINDS, "ao_ui")), state_sig,
+                   tuple(sorted(state.get("disabled") or [])) if DB.enabled() else ())
+            out.append({
+                "id": bdir.name, "name": state.get("name", bdir.name), "created_at": state.get("created_at", ""),
+                "counts": _memo(("counts", str(bdir), sig), lambda: _bundle_counts(bdir, state.get("review") or {})),
+            })
     out.sort(key=lambda b: b["created_at"], reverse=True)
     return out
+
+
+@contextmanager
+def _bundle_lifecycle_lock(bdir: Path, shared: bool = False):
+    data_dir = bdir.parent.parent
+    key = (DB.namespace(data_dir), bdir.name)
+    held = _HELD_LIFECYCLE_LOCKS.get()
+    current_mode = held.get(key)
+    if current_mode is not None:
+        if current_mode == "shared" and not shared:
+            raise RuntimeError("bundle lifecycle lock cannot be upgraded from shared to exclusive")
+        token = _HELD_LIFECYCLE_LOCKS.set(held)
+        try:
+            yield
+        finally:
+            _HELD_LIFECYCLE_LOCKS.reset(token)
+        return
+
+    mode = "shared" if shared else "exclusive"
+    token = None
+    if DB.enabled():
+        with DB.session_lock(data_dir, f"bundle-lifecycle:{bdir.name}", shared=shared) as acquired:
+            if not acquired:
+                raise ApiError(409, "bundle is busy")
+            token = _HELD_LIFECYCLE_LOCKS.set({**held, key: mode})
+            try:
+                yield
+            finally:
+                _HELD_LIFECYCLE_LOCKS.reset(token)
+        return
+    with open(bdir.parent / f".{bdir.name}.lifecycle.lock", "a") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        token = _HELD_LIFECYCLE_LOCKS.set({**held, key: mode})
+        try:
+            yield
+        finally:
+            _HELD_LIFECYCLE_LOCKS.reset(token)
 
 
 def delete_bundle(data_dir: Path, bundle_id: str) -> None:
     bdir = bundle_dir(data_dir, bundle_id)
     if not bdir.is_dir():
         raise ApiError(404, "bundle not found")
-    shutil.rmtree(bdir)
-    cdir = cache_root(data_dir) / bundle_id
-    if cdir.is_dir():
-        shutil.rmtree(cdir, ignore_errors=True)
+    with _bundle_lifecycle_lock(bdir):
+        if not bdir.is_dir():
+            raise ApiError(404, "bundle not found")
+        if DB.enabled():
+            tombstone = bdir.with_name(f".{bundle_id}.deleting-{secrets.token_hex(4)}")
+            os.replace(bdir, tombstone)
+            try:
+                DB.delete_bundle(data_dir, bundle_id)
+            except Exception:
+                if tombstone.exists() and not bdir.exists():
+                    os.replace(tombstone, bdir)
+                raise
+            shutil.rmtree(tombstone, ignore_errors=True)
+        else:
+            shutil.rmtree(bdir)
+        cdir = cache_root(data_dir) / bundle_id
+        if cdir.is_dir():
+            shutil.rmtree(cdir, ignore_errors=True)
 
 
 # ── Golden Set ────────────────────────────────────────────────────────────
@@ -757,9 +852,53 @@ def _require_history_doc(bdir: Path, doc_id: str) -> None:
         raise ApiError(404, "document not found")
 
 
-def _golden_lock(bdir: Path, doc_id: str):
-    lock_name = hashlib.sha256(doc_id.encode("utf-8")).hexdigest()
-    return open(bdir / f".golden-{lock_name}.lock", "a")
+@contextmanager
+def _golden_lock(bdir: Path, doc_id: str, shared: bool = False):
+    with _bundle_lifecycle_lock(bdir, shared=True):
+        if not bdir.is_dir():
+            raise ApiError(404, "bundle not found")
+        path: Path | None = None
+        before: bytes | None = None
+
+        def capture() -> None:
+            nonlocal path, before
+            path = _current_golden_path(bdir, doc_id)
+            before = path.read_bytes() if path.exists() else None
+
+        def rollback() -> None:
+            if shared or path is None:
+                return
+            current = path.read_bytes() if path.exists() else None
+            if current != before:
+                if before is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    _atomic_write_bytes(path, before)
+
+        if DB.enabled():
+            resource = f"golden:{bdir.name}:{doc_id}"
+            # Session locks outlive the DB transaction and keep rollback protected
+            # from both another writer and bundle deletion.
+            with DB.session_lock(bdir.parent.parent, resource, shared=shared) as acquired:
+                if not acquired:
+                    raise ApiError(409, "golden is busy")
+                capture()
+                try:
+                    with DB.connection():
+                        yield
+                except BaseException:
+                    rollback()
+                    raise
+        else:
+            lock_name = hashlib.sha256(doc_id.encode("utf-8")).hexdigest()
+            with open(bdir / f".golden-{lock_name}.lock", "a") as lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+                capture()
+                try:
+                    yield
+                except BaseException:
+                    rollback()
+                    raise
 
 
 def _check_golden_revision(raw: bytes | None, expected_revision: str | None) -> None:
@@ -778,8 +917,7 @@ def create_golden(data_dir: Path, bundle_id: str, doc_id: str, source: str, doc_
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
     gpath = _current_golden_path(bdir, doc_id)
-    with _golden_lock(bdir, doc_id) as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _golden_lock(bdir, doc_id):
         before = gpath.read_bytes() if gpath.exists() else None
         _check_golden_revision(before, expected_revision)
         if before is not None:
@@ -875,8 +1013,7 @@ def save_golden(data_dir: Path, bundle_id: str, doc_id: str, data: Any,
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
     p = _current_golden_path(bdir, doc_id)
-    with _golden_lock(bdir, doc_id) as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _golden_lock(bdir, doc_id):
         before = p.read_bytes() if p.exists() else None
         _check_golden_revision(before, expected_revision)
         _archive_baseline_if_needed(bdir, doc_id, before)
@@ -899,8 +1036,7 @@ def delete_golden(data_dir: Path, bundle_id: str, doc_id: str,
     _safe_id(doc_id, "doc_id")
     _require_doc(bdir, doc_id)
     p = _current_golden_path(bdir, doc_id)
-    with _golden_lock(bdir, doc_id) as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _golden_lock(bdir, doc_id):
         before = p.read_bytes() if p.exists() else None
         _check_golden_revision(before, expected_revision)
         if before is not None:
@@ -918,8 +1054,7 @@ def list_golden_history(data_dir: Path, bundle_id: str, doc_id: str, limit: int 
     bdir = bundle_dir(data_dir, bundle_id)
     _safe_id(doc_id, "doc_id")
     _require_history_doc(bdir, doc_id)
-    with _golden_lock(bdir, doc_id) as lock:
-        fcntl.flock(lock, fcntl.LOCK_SH)
+    with _golden_lock(bdir, doc_id, shared=True):
         items = list_snapshots(bdir, doc_id, limit, before)
         current_path = _current_golden_path(bdir, doc_id)
         raw = current_path.read_bytes() if current_path.exists() else None
@@ -958,8 +1093,7 @@ def restore_golden(data_dir: Path, bundle_id: str, doc_id: str, history_id: str,
         if restored_data is None:
             raise ApiError(422, f"golden history snapshot is invalid: {err or 'invalid JSON'}")
     p = _current_golden_path(bdir, doc_id)
-    with _golden_lock(bdir, doc_id) as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _golden_lock(bdir, doc_id):
         before = p.read_bytes() if p.exists() else None
         _check_golden_revision(before, expected_revision)
         _archive_baseline_if_needed(bdir, doc_id, before)

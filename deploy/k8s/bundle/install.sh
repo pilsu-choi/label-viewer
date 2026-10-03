@@ -2,8 +2,8 @@
 # install.sh — label-viewer 를 폐쇄망 k8s 에 설치·업그레이드한다(다시 실행해도 안전, 새 태그면 파드가 교체된다).
 #
 #   sudo ./install.sh [-n 네임스페이스(label-viewer)] [--node <노드>] [--local-pv <디렉토리>] [--no-import]
-#     --node      파드를 이 노드에 고정하고 이미지를 이 노드에 적재한다(이 스크립트를 이 노드에서 실행)
-#     --local-pv  동적 StorageClass 가 없을 때: 이 디렉토리를 local PV 로 쓴다(--node 필수)
+#     --node      앱·PostgreSQL Pod 를 이 노드에 고정하고 이미지를 이 노드에 적재한다
+#     --local-pv  동적 StorageClass 가 없을 때: 앱 데이터와 postgres/ 하위 디렉터리를 local PV 로 쓴다(--node 필수)
 #     --no-import 이미지 적재를 건너뛴다(이미 노드에 있을 때)
 set -euo pipefail
 BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,8 +37,7 @@ find_bin() {  # sudo secure_path 가 /usr/local/bin 을 빼므로 흔한 위치�
   done; return 1
 }
 import_image() {
-  local tar sock c ctr nerd imp=(images import)
-  tar="$(ls "${BUNDLE_DIR}"/images/label-viewer_*.tar)"
+  local tar sock c ctr nerd imp=(images import) present
   for sock in "${CONTAINERD_SOCK:-}" /run/containerd/containerd.sock /run/k3s/containerd/containerd.sock; do
     [ -n "$sock" ] && [ -S "$sock" ] && break; sock=""
   done
@@ -53,11 +52,15 @@ import_image() {
     echo "✘ containerd 의 ctr 을 찾지 못했습니다 (docker 명령이 Podman 이면 kubelet 이 이미지를 못 봅니다)." >&2
     echo "  sudo CTR=/경로/ctr CONTAINERD_SOCK=/경로/containerd.sock ./install.sh ..." >&2; exit 2
   fi
-  if "${c[@]}" images ls 2>/dev/null | grep -qE "label-viewer[: ]+${TAG}( |$)"; then
-    echo "  이미 있음: ${IMG}"; return 0
+  present="$("${c[@]}" images ls 2>/dev/null || true)"
+  if grep -qE "label-viewer[: ]+${TAG}( |$)" <<<"$present" && grep -qE 'postgres[: ]+17( |$)' <<<"$present"; then
+    echo "  이미 있음: ${IMG}, postgres:17"; return 0
   fi
-  echo "▶ 이미지 적재: ${IMG}"
-  "${c[@]}" "${imp[@]}" "$tar"
+  for tar in "${BUNDLE_DIR}"/images/*.tar; do
+    [ -f "$tar" ] || { echo "이미지 tar 가 없습니다: ${BUNDLE_DIR}/images" >&2; exit 1; }
+    echo "▶ 이미지 적재: $(basename "$tar")"
+    "${c[@]}" "${imp[@]}" "$tar"
+  done
 }
 [ "$IMPORT" = 0 ] || import_image
 
@@ -65,9 +68,33 @@ ensure_kube
 K=(kubectl -n "$NS")
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
+# Retain the generated Secret across upgrades. New credentials are written to
+# mode-600 temporary files and applied without printing their contents.
+SECRET_TMP=""
+cleanup_secret() { [ -z "$SECRET_TMP" ] || rm -rf "$SECRET_TMP"; }
+OVERLAY=""
+cleanup() { [ -z "$OVERLAY" ] || rm -rf "$OVERLAY"; cleanup_secret; }
+trap cleanup EXIT
+if kubectl -n "$NS" get secret label-viewer-postgres >/dev/null 2>&1; then
+  SECRET_KEYS="$(kubectl -n "$NS" get secret label-viewer-postgres -o go-template='{{range $key, $value := .data}}{{$key}} {{end}}')"
+  for key in password database-url; do
+    grep -qw "$key" <<<"$SECRET_KEYS" || { echo "✘ label-viewer-postgres Secret 에 ${key} 항목이 없습니다" >&2; exit 1; }
+  done
+else
+  command -v openssl >/dev/null 2>&1 || { echo "openssl 이 새 PostgreSQL 비밀번호 생성에 필요합니다" >&2; exit 2; }
+  SECRET_TMP="$(mktemp -d)"; chmod 700 "$SECRET_TMP"
+  openssl rand -hex 32 | tr -d '\n' > "${SECRET_TMP}/password"; chmod 600 "${SECRET_TMP}/password"
+  printf 'postgresql://label_viewer:%s@label-viewer-postgres:5432/label_viewer' "$(<"${SECRET_TMP}/password")" > "${SECRET_TMP}/database-url"
+  chmod 600 "${SECRET_TMP}/database-url"
+  kubectl -n "$NS" create secret generic label-viewer-postgres \
+    --from-file=password="${SECRET_TMP}/password" --from-file=database-url="${SECRET_TMP}/database-url" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  cleanup_secret; SECRET_TMP=""
+fi
+
 # ── 저장소 ──────────────────────────────────────────────────────────────
 # kustomize 는 절대 경로 리소스를 막아 오버레이를 번들 안에 둔다
-OVERLAY="$(mktemp -d -p "$BUNDLE_DIR" .overlay.XXXXXX)"; trap 'rm -rf "$OVERLAY"' EXIT
+OVERLAY="$(mktemp -d -p "$BUNDLE_DIR" .overlay.XXXXXX)"
 {
   echo "apiVersion: kustomize.config.k8s.io/v1beta1"; echo "kind: Kustomization"
   echo "namespace: ${NS}"; echo "resources: [../k8s]"; echo "patches:"
@@ -75,6 +102,10 @@ OVERLAY="$(mktemp -d -p "$BUNDLE_DIR" .overlay.XXXXXX)"; trap 'rm -rf "$OVERLAY"
 add_patch() {  # add_patch <kind> <name> <JSON patch(op 목록)>
   printf '  - target: {kind: %s, name: %s}\n    patch: |-\n      %s\n' "$1" "$2" "$3" >> "${OVERLAY}/kustomization.yaml"
 }
+APP_SC="$("${K[@]}" get pvc label-viewer-data -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)"
+DB_SC="$("${K[@]}" get pvc label-viewer-postgres-data -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)"
+APP_PVC_EXISTS=0; "${K[@]}" get pvc label-viewer-data >/dev/null 2>&1 && APP_PVC_EXISTS=1
+DB_PVC_EXISTS=0; "${K[@]}" get pvc label-viewer-postgres-data >/dev/null 2>&1 && DB_PVC_EXISTS=1
 if [ -n "$LOCAL_PV" ]; then
   echo "▶ local PV: ${NODE}:${LOCAL_PV}"
   mkdir -p "$LOCAL_PV"; chown 10001:10001 "$LOCAL_PV"
@@ -97,14 +128,34 @@ spec:
         - matchExpressions:
             - {key: kubernetes.io/hostname, operator: In, values: [${NODE}]}
 PV
-  SC="$LOCAL_SC"
-elif SC="$("${K[@]}" get pvc label-viewer-data -o jsonpath='{.spec.storageClassName}' 2>/dev/null)"; then
-  :   # 기존 PVC 의 클래스를 그대로 둔다(PVC spec 은 바꿀 수 없다)
-elif ! kubectl get sc -o json | grep -q 'is-default-class": *"true"'; then
-  echo "✘ 기본 StorageClass 가 없어 PVC 를 만들 수 없습니다 — --node <노드> --local-pv <디렉토리> 로 다시 실행하십시오." >&2; exit 1
+  mkdir -p "${LOCAL_PV}/postgres"; chown 999:999 "${LOCAL_PV}/postgres"
+  command -v chcon >/dev/null 2>&1 && chcon -R -t container_file_t "${LOCAL_PV}/postgres" 2>/dev/null || true
+  kubectl apply -f - <<PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: $(postgres_pv_name "$NS")
+  labels: {app: label-viewer, app.kubernetes.io/component: database}
+spec:
+  capacity: {storage: 20Gi}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ${POSTGRES_LOCAL_SC}
+  local: {path: ${LOCAL_PV}/postgres}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: kubernetes.io/hostname, operator: In, values: [${NODE}]}
+PV
+  APP_SC="$LOCAL_SC"; DB_SC="$POSTGRES_LOCAL_SC"
+elif ! kubectl get sc -o json | grep -q 'is-default-class": *"true"' && { [ "$APP_PVC_EXISTS" = 0 ] || [ "$DB_PVC_EXISTS" = 0 ]; }; then
+  echo "✘ 기본 StorageClass 가 없어 앱·PostgreSQL PVC 를 만들 수 없습니다 — --node <노드> --local-pv <디렉토리> 로 다시 실행하십시오." >&2; exit 1
 fi
-[ -z "${SC:-}" ] || add_patch PersistentVolumeClaim label-viewer-data "[{\"op\":\"add\",\"path\":\"/spec/storageClassName\",\"value\":\"${SC}\"}]"
+[ -z "$APP_SC" ] || add_patch PersistentVolumeClaim label-viewer-data "[{\"op\":\"add\",\"path\":\"/spec/storageClassName\",\"value\":\"${APP_SC}\"}]"
+[ -z "$DB_SC" ] || add_patch PersistentVolumeClaim label-viewer-postgres-data "[{\"op\":\"add\",\"path\":\"/spec/storageClassName\",\"value\":\"${DB_SC}\"}]"
 [ -z "$NODE" ] || add_patch Deployment label-viewer "[{\"op\":\"add\",\"path\":\"/spec/template/spec/nodeSelector\",\"value\":{\"kubernetes.io/hostname\":\"${NODE}\"}}]"
+[ -z "$NODE" ] || add_patch StatefulSet label-viewer-postgres "[{\"op\":\"add\",\"path\":\"/spec/template/spec/nodeSelector\",\"value\":{\"kubernetes.io/hostname\":\"${NODE}\"}}]"
 
 echo "▶ 배포 (${NS}, ${IMG})"
 kubectl apply -k "$OVERLAY"

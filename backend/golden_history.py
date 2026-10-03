@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import db as DB
+
 
 def golden_revision(raw: bytes | None) -> str:
     return hashlib.sha256(raw).hexdigest() if raw is not None else "missing"
@@ -21,17 +23,20 @@ def history_dir(bdir: Path, doc_id: str) -> Path:
 
 def archive_snapshot(bdir: Path, doc_id: str, raw: bytes | None, action: str) -> dict[str, Any]:
     """Write an immutable snapshot and metadata. Caller holds the document lock."""
-    directory = history_dir(bdir, doc_id)
-    directory.mkdir(parents=True, exist_ok=True)
     history_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}-{secrets.token_hex(4)}"
     revision = golden_revision(raw)
+    metadata = {"id": history_id, "created_at": datetime.now(timezone.utc).isoformat(),
+                "action": action, "revision": revision, "has_golden": raw is not None}
+    if DB.enabled():
+        DB.insert_golden_history(bdir.parent.parent, bdir.name, doc_id, metadata, raw)
+        return metadata
+    directory = history_dir(bdir, doc_id)
+    directory.mkdir(parents=True, exist_ok=True)
     if raw is not None:
         data_path = directory / f"{history_id}.json"
         tmp = directory / f".{history_id}.tmp"
         tmp.write_bytes(raw)
         tmp.replace(data_path)
-    metadata = {"id": history_id, "created_at": datetime.now(timezone.utc).isoformat(),
-                "action": action, "revision": revision, "has_golden": raw is not None}
     meta_path = directory / f"{history_id}.meta.json"
     tmp_meta = directory / f".{history_id}.meta.tmp"
     tmp_meta.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
@@ -40,6 +45,9 @@ def archive_snapshot(bdir: Path, doc_id: str, raw: bytes | None, action: str) ->
 
 
 def list_snapshots(bdir: Path, doc_id: str, limit: int = 100, before: str | None = None) -> list[dict[str, Any]]:
+    if DB.enabled():
+        return DB.list_golden_history(bdir.parent.parent, bdir.name, doc_id,
+                                      max(1, min(int(limit), 500)), before)
     directory = history_dir(bdir, doc_id)
     if not directory.is_dir():
         return []
@@ -56,6 +64,8 @@ def list_snapshots(bdir: Path, doc_id: str, limit: int = 100, before: str | None
 
 
 def read_snapshot(bdir: Path, doc_id: str, history_id: str) -> tuple[dict[str, Any], bytes | None] | None:
+    if DB.enabled():
+        return DB.read_golden_history(bdir.parent.parent, bdir.name, doc_id, history_id)
     directory = history_dir(bdir, doc_id)
     # IDs are generated internally and must remain a single filename component.
     if not history_id or "/" in history_id or "\\" in history_id or history_id.startswith("."):

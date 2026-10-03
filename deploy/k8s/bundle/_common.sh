@@ -24,3 +24,5 @@ need_root() {
 
 LOCAL_SC=label-viewer-local
 pv_name() { echo "label-viewer-local-$1"; }   # pv_name <네임스페이스> — PV 는 클러스터 범위라 네임스페이스별로 이름을 가른다
+POSTGRES_LOCAL_SC=label-viewer-postgres-local
+postgres_pv_name() { echo "label-viewer-postgres-local-$1"; }

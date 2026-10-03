@@ -1,15 +1,36 @@
-# 단일 컨테이너 배포. 로컬: docker compose up -d --build → http://127.0.0.1:8765
+# 로컬: cp .env.example .env 후 임의 비밀번호를 설정하고 docker compose up -d --build
 # AWS 서버도 이 파일을 그대로 쓴다(deploy/aws/deploy.sh 가 .env.aws 와 함께 올린다).
 name: label-viewer
 
 services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${LABEL_VIEWER_DB_NAME:-label_viewer}
+      POSTGRES_USER: ${LABEL_VIEWER_DB_USER:-label_viewer}
+      POSTGRES_PASSWORD: ${LABEL_VIEWER_DB_PASSWORD:?Set LABEL_VIEWER_DB_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   label-viewer:
     build: .
     image: label-viewer:latest
     container_name: label-viewer
     restart: unless-stopped
     environment:
+      LABEL_VIEWER_DATABASE_URL: postgresql://${LABEL_VIEWER_DB_USER:-label_viewer}:${LABEL_VIEWER_DB_PASSWORD:?Set LABEL_VIEWER_DB_PASSWORD in .env}@postgres:5432/${LABEL_VIEWER_DB_NAME:-label_viewer}
+      LABEL_VIEWER_DB_NAMESPACE: ${LABEL_VIEWER_DB_NAMESPACE:-label-viewer}
       LABEL_VIEWER_MAX_UPLOAD_MB: ${LABEL_VIEWER_MAX_UPLOAD_MB:-2048}
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       # 기본은 루프백 전용. 인증이 없으므로 외부 노출은 SSH 터널로 한다.
       - "${LABEL_VIEWER_BIND:-127.0.0.1}:${LABEL_VIEWER_PORT:-8765}:8765"
@@ -24,3 +45,4 @@ services:
 
 volumes:
   data:
+  postgres_data:
