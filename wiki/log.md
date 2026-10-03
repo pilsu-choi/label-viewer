@@ -202,3 +202,38 @@ status: active
 
 - Creation: `2026-10-03-bundle-list-performance.md` — 최근 5개·서버 검색/페이지, DB 집계 재사용 및 조회 상태 표시 구현·검증 기록.
 - Update: README/API에 limit·목록 페이지 API와 동작 설명.
+
+## 2026-10-03 상위 wiki 동기화
+
+### Creation
+
+- [2026-09-27-agentic-ocr-ui-response-205.md](2026-09-27-agentic-ocr-ui-response-205.md)
+- [2026-09-27-agentic-ocr-ui-response-status.md](2026-09-27-agentic-ocr-ui-response-status.md)
+- [2026-09-27-agentic-ocr-ui-harness-format.md](2026-09-27-agentic-ocr-ui-harness-format.md)
+- [2026-09-28-batch-golden-viewer.md](2026-09-28-batch-golden-viewer.md)
+- [2026-09-29-sample205-label-viewer-upload.md](2026-09-29-sample205-label-viewer-upload.md)
+- [2026-09-30-golden-set-59-aws-harness-benchmark.md](2026-09-30-golden-set-59-aws-harness-benchmark.md)
+- [2026-10-02-golden-benefit-col-extract-unify.md](2026-10-02-golden-benefit-col-extract-unify.md)
+- [2026-10-02-golden-harness-misextraction-analysis.md](2026-10-02-golden-harness-misextraction-analysis.md)
+- [2026-10-02-detail-testset200.md](2026-10-02-detail-testset200.md)
+- [2026-10-02-six-type-testsets.md](2026-10-02-six-type-testsets.md)
+- [2026-10-02-aws-integrated-deploy-1002d.md](2026-10-02-aws-integrated-deploy-1002d.md)
+- [2026-10-02-aws-integrated-deploy-1002e.md](2026-10-02-aws-integrated-deploy-1002e.md)
+- [2026-10-02-institution-type-r3-followup.md](2026-10-02-institution-type-r3-followup.md)
+- [2026-10-03-golden-benefit-printed-only.md](2026-10-03-golden-benefit-printed-only.md)
+- [2026-10-03-oct02-weekly-report-summary.md](2026-10-03-oct02-weekly-report-summary.md)
+- [2026-10-03-summary-rows-policy-integration.md](2026-10-03-summary-rows-policy-integration.md)
+- [2026-10-03-synthetic-dataset-codex-작업지시서.md](2026-10-03-synthetic-dataset-codex-작업지시서.md)
+- [2026-10-02-agents-bug-principle.md](2026-10-02-agents-bug-principle.md)
+- [2026-10-02-agents-aws-batch-test.md](2026-10-02-agents-aws-batch-test.md)
+- [2026-10-03-parallel-subagents-preference.md](2026-10-03-parallel-subagents-preference.md)
+- [2026-10-03-wiki-sync.md](2026-10-03-wiki-sync.md)
+
+### Update
+
+- [2026-09-28-golden-set-viewer.md](2026-09-28-golden-set-viewer.md): 상위 문서 내용 반영 및 폐기 상태 보존.
+- index.md와 AGENTS.md에 동기화 목록과 우선순위 규칙 반영.
+
+- [2026-10-02-docraft-read-latency-analysis.md](2026-10-02-docraft-read-latency-analysis.md): 주간 요약의 관련 근거 동기화.
+
+- [2026-10-02-aws-integrated-deploy-1002j.md](2026-10-02-aws-integrated-deploy-1002j.md): 주간 요약의 관련 근거 동기화.

@@ -10,7 +10,7 @@ status: deprecated
 브랜치: `feat/golden-viewer` (`dev` 기반) → `dev`·`main` 병합
 워크트리: `label_veiwer/.worktrees/golden-viewer`
 
-> **Deprecated**: [번들 기반 Golden Set 관리 Web App](2026-09-28-bundle-golden-viewer.md)으로 대체됐다. 이 문서의 코드(`app.py`, `static/`)는 삭제됐다.
+> **Deprecated**: [번들 기반 Golden Set 관리 Web App](2026-09-28-bundle-golden-viewer.md)으로 대체됐다. 이 문서의 코드(`app.py`, `static/`)는 삭제됐다. 2026-10-03 저장소 wiki의 폐기 상태를 상위 wiki에 동기화했다.
 
 ## 목적
 
@@ -84,6 +84,6 @@ python3 -m pytest test_app.py -q
 
 ## 관련
 
-- batch 뷰어 정답지 검수 확장 (`past-data-aiocr-batch` wiki `2026-09-28-batch-golden-viewer.md`): 운영 데이터(DB·마운트) 기반 검수는 여기로 이어졌다
-- AO UI response 205건 수집 (작업 공간 루트 wiki `2026-09-27-agentic-ocr-ui-response-205.md`)
-- AO UI 응답의 하네스 입력 형식 (작업 공간 루트 wiki `2026-09-27-agentic-ocr-ui-harness-format.md`)
+- [batch 뷰어 정답지 검수 확장](2026-09-28-batch-golden-viewer.md): 운영 데이터(DB·마운트) 기반 검수는 여기로 이어졌다
+- [AO UI response 205건 수집](2026-09-27-agentic-ocr-ui-response-205.md)
+- [AO UI 응답의 하네스 입력 형식](2026-09-27-agentic-ocr-ui-harness-format.md)
