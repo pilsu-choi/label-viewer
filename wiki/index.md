@@ -83,3 +83,5 @@ status: active
 - [2026-10-02-docraft-read-latency-analysis.md](2026-10-02-docraft-read-latency-analysis.md): 주간 요약의 관련 근거 동기화.
 
 - [2026-10-02-aws-integrated-deploy-1002j.md](2026-10-02-aws-integrated-deploy-1002j.md): 주간 요약의 관련 근거 동기화.
+
+- [2026-10-05-clinical-opinion-field.md](2026-10-05-clinical-opinion-field.md)
