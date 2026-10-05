@@ -15,14 +15,8 @@ _ALIAS = {
     "약제영수증": "약제비영수증", "입원확인서": "입퇴원확인서",
     "진료비세부산정내역서": "세부내역서", "진료비세부내역서": "세부내역서",
 }
-# 필수 필드: 스키마에서 정의되어 샘플에 없어도 포함해야 하는 필드
-# 형식: doc_type -> group_key -> list of required field keys
-REQUIRED_FIELDS = {
-    "진단서": {"진단": ["진단일", "최종진단", "임상적추정", "진료소견"]},
-    "입퇴원확인서": {"진단": ["진단일", "최종진단", "임상적추정", "진료소견"]},
-    "소견서": {"진단": ["진단일", "최종진단", "임상적추정", "진료소견"]},
-    "수술확인서": {"진단": ["진단일", "최종진단", "임상적추정", "진료소견"]},
-}
+# 표본에 없어도 정답지 양식에 넣는 스키마 필드: doc_type -> group -> keys
+REQUIRED_FIELDS = {t: {"진단": ["진료소견"]} for t in ("진단서", "입퇴원확인서", "소견서", "수술확인서")}
 _TEMPLATE_FILE = Path(__file__).with_name("doc_templates.json")
 TEMPLATES: dict[str, dict] = json.loads(_TEMPLATE_FILE.read_text(encoding="utf-8")) if _TEMPLATE_FILE.exists() else {}
 
