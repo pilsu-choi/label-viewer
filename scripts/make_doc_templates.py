@@ -9,7 +9,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from backend.doctype import DOC_TYPES, canon  # noqa: E402
+from backend.doctype import DOC_TYPES, REQUIRED_FIELDS, canon  # noqa: E402
 
 DEFAULT_SRC = "/home/pilsu/projects/mirae-assets/e2e/표본결과"
 OUT = Path(__file__).resolve().parent.parent / "backend" / "doc_templates.json"
@@ -36,6 +36,13 @@ def build(docs: list[dict], name: str) -> dict:
             th = theaders.setdefault(t["key"], Counter())
             for h in t.get("headers") or []:
                 th[h] += 1
+
+    # Apply required fields for this doc type
+    req = REQUIRED_FIELDS.get(name, {})
+    for group_key, req_fields in req.items():
+        for field_key in req_fields:
+            gfields.setdefault(group_key, Counter())[field_key] = n  # 무조건 포함되도록 count를 n으로 설정
+
     return {
         "doc_type": name,
         "extracted_fields": [{"key": k, "value": ""} for k in keep(fields, n)],
