@@ -15,6 +15,8 @@ _ALIAS = {
     "약제영수증": "약제비영수증", "입원확인서": "입퇴원확인서",
     "진료비세부산정내역서": "세부내역서", "진료비세부내역서": "세부내역서",
 }
+# 표본에 없어도 정답지 양식에 넣는 스키마 필드: doc_type -> group -> keys
+REQUIRED_FIELDS = {t: {"진단": ["진료소견"]} for t in ("진단서", "입퇴원확인서", "소견서", "수술확인서")}
 _TEMPLATE_FILE = Path(__file__).with_name("doc_templates.json")
 TEMPLATES: dict[str, dict] = json.loads(_TEMPLATE_FILE.read_text(encoding="utf-8")) if _TEMPLATE_FILE.exists() else {}
 
