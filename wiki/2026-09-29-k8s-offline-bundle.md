@@ -62,6 +62,7 @@ kind(v1.3x) 노드 컨테이너 안에서 번들 `0.1.0-20260929-e24e876` 설치
 | 2026-09-30 | `label-viewer-k8s-0.1.0-20260930-a047041` | `a047041`(dev) | 전체 묶음 ZIP 내보내기, 한글 파일명(CP949·NFD) ZIP 인식, 업로드·조회 500 오류 수정 반영, 192M, SHA256SUMS 검증(삭제됨) |
 | 2026-09-30 | `label-viewer-k8s-0.1.0-20260930-01c2fb9` | `01c2fb9`(dev) | 화면 로드·편집 성능 최적화 반영, 192M, SHA256SUMS 검증. NAS 동기화 경로에 둠(삭제됨) |
 | 2026-09-30 | `label-viewer-k8s-0.1.0-20260930-b7a3a2f` | `b7a3a2f`(dev) | 비교 탭 채택 UX(오클릭 방지·되돌리기·빈 값 채택, 상태 배지 위치 통일) 반영, 192M, tar sha256 검증. `미래에셋` 폴더 바로 아래에 둠 |
+| 2026-10-06 | `label-viewer-k8s-0.1.0-20261006-02081bd` | `02081bd`(dev) | 번들 화면 문서 요약 DB 저장·LRU 캐시 반영([기록](2026-10-06-bundle-view-cache.md)), 674M, tar sha256 검증, 이미지 amd64·`/api/health` 확인. `미래에셋` 폴더 바로 아래에 둠 |
 
 번들은 NAS 동기화 경로 `C:\Users\user\Desktop\미래에셋\` 바로 아래(mlife-ocr 번들 tar 옆)에 두고 이전 번들은 지운다. 기준은 `mirae-assets/for_nas_patch_folder.md`.
 
