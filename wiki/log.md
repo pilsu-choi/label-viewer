@@ -242,3 +242,5 @@ status: active
 - [2026-10-05-clinical-opinion-field.md](2026-10-05-clinical-opinion-field.md): 진단서4종 진료소견 추가 기록 동기화.
 
 - Creation: `2026-10-06-bundle-view-cache.md` — 번들 화면 문서 요약 PostgreSQL 저장, `_memo` LRU 전환, 3,500건 규모 실측·배포 데이터 보존 기록.
+
+- Update: `2026-09-29-k8s-offline-bundle.md` — 반입 이력에 `label-viewer-k8s-0.1.0-20261006-02081bd` 추가.
