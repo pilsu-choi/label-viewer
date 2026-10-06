@@ -55,6 +55,7 @@ status: active
 - [최근 번들 조회 지연 원인 조사](2026-10-03-recent-bundles-diagnosis.md)
 
 - [최근 번들·전체 목록 조회 성능 개선](2026-10-03-bundle-list-performance.md)
+- [번들 화면 문서 요약 DB 저장과 LRU 캐시](2026-10-06-bundle-view-cache.md)
 
 ## 2026-10-03 상위 wiki 동기화
 
