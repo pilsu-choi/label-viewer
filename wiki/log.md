@@ -244,3 +244,6 @@ status: active
 - Creation: `2026-10-06-bundle-view-cache.md` — 번들 화면 문서 요약 PostgreSQL 저장, `_memo` LRU 전환, 3,500건 규모 실측·배포 데이터 보존 기록.
 
 - Update: `2026-09-29-k8s-offline-bundle.md` — 반입 이력에 `label-viewer-k8s-0.1.0-20261006-02081bd` 추가.
+
+- Creation: `2026-10-06-aws-postgres-redeploy.md` — dev `c5d96d5` AWS 재배포, 파일 상태 PostgreSQL 이관·확인.
+- Update: `2026-09-29-docker-aws-deploy.md` — 2026-10-06 재배포 이력 추가.

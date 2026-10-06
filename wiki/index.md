@@ -56,6 +56,7 @@ status: active
 
 - [최근 번들·전체 목록 조회 성능 개선](2026-10-03-bundle-list-performance.md)
 - [번들 화면 문서 요약 DB 저장과 LRU 캐시](2026-10-06-bundle-view-cache.md)
+- [Label Viewer AWS 재배포 — PostgreSQL 전환](2026-10-06-aws-postgres-redeploy.md)
 
 ## 2026-10-03 상위 wiki 동기화
 
