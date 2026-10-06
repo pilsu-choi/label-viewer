@@ -10,10 +10,12 @@ import os
 import re
 import secrets
 import shutil
+import threading
 import time
 import unicodedata
 import zipfile
 import zlib
+from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -141,11 +143,13 @@ def _atomic_write_json(path: Path, data: Any) -> None:
 # ── 캐시 ──────────────────────────────────────────────────────────────────
 # 프로세스 내 캐시. 키에 파일 (inode, mtime_ns, size) 시그니처를 넣어 원자적 교체·외부 변경(다른 워커 포함)에도 무효화된다.
 
-_MEMO: dict = {}
+# 가득 차면 가장 오래 안 쓴 항목부터 버린다(LRU). 통째로 비우면 수천 건 번들 조회·내보내기 중에 디렉터리 목록까지 다시 읽게 된다
+_MEMO: OrderedDict = OrderedDict()
 _MEMO_MAX = 4096
 # 문서 요약은 작고 번들 화면마다 전부 쓰인다. 파싱 JSON 캐시와 나눠야 수천 건 번들에서 서로 밀어내지 않는다
-_SUM_MEMO: dict = {}
+_SUM_MEMO: OrderedDict = OrderedDict()
 _SUM_MEMO_MAX = 50_000
+_MEMO_LOCK = threading.Lock()
 _BUNDLE_SUMMARY_MEMO: dict[str, dict] = {}
 _BUNDLE_SUMMARY_MEMO_MAX = 4096
 _BUNDLE_SUMMARY_VERSION = 1  # Increment when summary counting/parsing semantics change.
@@ -161,14 +165,22 @@ def _sig(p: Path) -> tuple | None:
     return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_mode, *racy)
 
 
-def _memo(key: tuple, fn: Callable[[], Any], store: dict = _MEMO, limit: int = _MEMO_MAX) -> Any:
-    try:
-        return store[key]
-    except KeyError:
-        if len(store) >= limit:
-            store.clear()
-        val = store[key] = fn()
-        return val
+def _memo(key: tuple, fn: Callable[[], Any], store: OrderedDict = _MEMO, limit: int = _MEMO_MAX) -> Any:
+    with _MEMO_LOCK:
+        if key in store:
+            store.move_to_end(key)
+            return store[key]
+    val = fn()  # 계산은 잠금 밖에서 한다. 같은 키를 두 스레드가 동시에 계산해도 결과는 같다
+    _memo_put(key, val, store, limit)
+    return val
+
+
+def _memo_put(key: tuple, val: Any, store: OrderedDict = _MEMO, limit: int = _MEMO_MAX) -> None:
+    with _MEMO_LOCK:
+        store[key] = val
+        store.move_to_end(key)
+        while len(store) > limit:
+            store.popitem(last=False)
 
 
 # ── 경로 ──────────────────────────────────────────────────────────────────
@@ -649,14 +661,65 @@ def doc_detail(data_dir: Path, bundle_id: str, doc_id: str, *, state_snapshot: d
                                     include_pages=include_pages)
 
 
-def _doc_summary(bdir: Path, doc_id: str, rv: str) -> dict:
-    """bundle_view 의 문서 한 줄 요약. 문서 파일 시그니처+검수 상태가 같으면 캐시를 쓴다."""
-    paths = {k: find_kind_file(bdir, k, doc_id) for k in (*DOC_KINDS, "ao_ui")}
-    return _memo(("sum", str(bdir), doc_id, rv, tuple(_sig(p) if p else None for p in paths.values())),
-                 lambda: _compute_summary(paths, doc_id, rv), _SUM_MEMO, _SUM_MEMO_MAX)
+def _summary_code_version() -> str:
+    """요약 계산에 쓰이는 백엔드 코드·양식 해시. 배포로 비교·채점 규칙이 바뀌면 DB에 저장된 요약을 다시 계산한다."""
+    h = hashlib.sha1()
+    root = Path(__file__).resolve().parent
+    for p in sorted([*root.glob("*.py"), *root.glob("*.json")]):
+        h.update(p.name.encode())
+        h.update(p.read_bytes())
+    return h.hexdigest()[:16]
 
 
-def _compute_summary(paths: dict, doc_id: str, rv: str) -> dict:
+_SUMMARY_CODE_VERSION = _summary_code_version()
+
+
+def _doc_fingerprint(sigs: tuple) -> str:
+    """문서 파일 시그니처와 코드 버전의 해시. DB 저장본이 지금 파일·코드로 만든 것인지 확인한다."""
+    raw = json.dumps([_SUMMARY_CODE_VERSION, sigs], separators=(",", ":")).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _doc_summaries(data_dir: Path, bundle_id: str, bdir: Path, ids: list[str]) -> dict[str, dict]:
+    """문서별 요약(검수 상태 제외). 프로세스 캐시 → DB 저장본 → 새 계산 순서로 찾는다.
+
+    DB 저장본은 파일 시그니처·코드 버전이 같을 때만 쓰므로 재시작·다른 워커에서도 JSON 을 다시 읽지 않는다.
+    """
+    out: dict[str, dict] = {}
+    missing: dict[str, tuple[dict, tuple, tuple]] = {}
+    root = str(bdir)
+    for doc_id in ids:
+        paths = {k: find_kind_file(bdir, k, doc_id) for k in (*DOC_KINDS, "ao_ui")}
+        sigs = tuple((p.name, _sig(p)) if p else None for p in paths.values())
+        key = ("sum", root, doc_id, sigs)
+        with _MEMO_LOCK:
+            hit = _SUM_MEMO.get(key)
+            if hit is not None:
+                _SUM_MEMO.move_to_end(key)
+        if hit is not None:
+            out[doc_id] = hit
+        else:
+            missing[doc_id] = (paths, sigs, key)
+    if not missing:
+        return out
+    stored = DB.get_doc_summaries(data_dir, bundle_id, list(missing)) if DB.enabled() else {}
+    fresh: dict[str, tuple[str, dict]] = {}
+    for doc_id, (paths, sigs, key) in missing.items():
+        fp = _doc_fingerprint(sigs)
+        row = stored.get(doc_id)
+        if row and row[0] == fp:
+            summary = row[1]
+        else:
+            summary = _compute_summary(paths, doc_id)
+            fresh[doc_id] = (fp, summary)
+        _memo_put(key, summary, _SUM_MEMO, _SUM_MEMO_MAX)
+        out[doc_id] = summary
+    if fresh and DB.enabled():
+        DB.save_doc_summaries(data_dir, bundle_id, fresh)
+    return out
+
+
+def _compute_summary(paths: dict, doc_id: str) -> dict:
     has = {k: paths[k] is not None for k in DOC_KINDS}
     errors = []
     parsed: dict[str, dict | None] = {}
@@ -676,7 +739,7 @@ def _compute_summary(paths: dict, doc_id: str, rv: str) -> dict:
           "harness": score(rows, "harness") if parsed["golden"] else None}
     mismatch = sum(1 for r in rows if r.get("ao_status") not in ("", "MATCH") or r.get("harness_status") not in ("", "MATCH"))
     return {
-        "id": doc_id, "has": has, "errors": errors, "review": rv,
+        "id": doc_id, "has": has, "errors": errors,
         "doc_type": label(_doc_type_of(parsed["golden"], parsed["ao_extract"], parsed["harness"])),
         "doc_type_mismatch": doc_type_mismatch(parsed["harness"]),
         "classification": _classification(parsed), "score": sc, "mismatch": mismatch,
@@ -724,9 +787,11 @@ def bundle_view(data_dir: Path, bundle_id: str) -> dict:
     state = load_state(bdir)
     review = state.get("review") or {}
     disabled = disabled_ids(state)
-    # 캐시된 요약은 고치지 않고 활성 여부만 얹은 새 dict 를 만든다
-    docs = [{**_doc_summary(bdir, doc_id, review.get(doc_id, "")), "enabled": doc_id not in disabled}
-            for doc_id in doc_ids(bdir)]
+    ids = doc_ids(bdir)
+    summaries = _doc_summaries(data_dir, bundle_id, bdir, ids)
+    # 캐시된 요약은 고치지 않고 검수·활성 상태만 얹은 새 dict 를 만든다
+    docs = [{**summaries[doc_id], "review": review.get(doc_id, ""), "enabled": doc_id not in disabled}
+            for doc_id in ids]
     return {
         "id": bundle_id, "name": state.get("name", bundle_id), "created_at": state.get("created_at", ""),
         "docs": docs,

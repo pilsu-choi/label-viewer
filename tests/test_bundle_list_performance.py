@@ -188,3 +188,87 @@ def test_review_changes_use_persisted_counts_without_parsing_and_delete_cascades
     assert B.list_bundles(postgres_namespace)[0]["counts"]["reviewed"] == 0
     B.delete_bundle(postgres_namespace, bid)
     assert DB.get_bundle_summaries(postgres_namespace, [bid]) == {}
+
+
+def test_memo_evicts_least_recently_used_instead_of_clearing(monkeypatch):
+    store = B.OrderedDict()
+    calls = []
+
+    def make(v):
+        def fn():
+            calls.append(v)
+            return v
+        return fn
+
+    for i in range(3):
+        B._memo(("k", i), make(i), store, 3)
+    B._memo(("k", 0), make("again"), store, 3)  # 0 을 최근 사용으로 올린다
+    B._memo(("k", 3), make(3), store, 3)        # 가장 오래 안 쓴 1 만 빠진다
+    assert list(store) == [("k", 2), ("k", 0), ("k", 3)]
+    assert calls == [0, 1, 2, 3]
+
+
+def _view_counts(view):
+    return {d["id"]: (d["review"], d["enabled"], d["errors"]) for d in view["docs"]}
+
+
+def test_bundle_view_overlays_review_without_recomputing_summary(tmp_path, file_mode, monkeypatch):
+    bid = _upload(tmp_path, "view")
+    time.sleep(0.03)
+    B.bundle_view(tmp_path, bid)
+    monkeypatch.setattr(B, "_compute_summary", lambda *_a: (_ for _ in ()).throw(AssertionError("recomputed")))
+    B.set_review(tmp_path, bid, "doc", "done")
+    view = B.bundle_view(tmp_path, bid)
+    assert view["docs"][0]["review"] == "done"
+    assert view["summary"]["reviewed"] == 1
+
+
+def test_bundle_view_uses_persisted_doc_summaries_after_restart(postgres_namespace, monkeypatch):
+    data_dir = postgres_namespace
+    bid = B.process_upload(data_dir, [
+        ("batch/original/a.png", io.BytesIO(b"a")),
+        ("batch/golden/a.json", io.BytesIO(b"{} ")),
+        ("batch/original/b.png", io.BytesIO(b"b")),
+        ("batch/golden/b.json", io.BytesIO(b"{x}")),
+    ], "view-cache", 1_000_000)
+    time.sleep(0.03)
+    B.set_review(data_dir, bid, "a", "done")
+    first = B.bundle_view(data_dir, bid)
+
+    # 재시작한 워커처럼 프로세스 캐시를 모두 비운다
+    B._MEMO.clear()
+    B._SUM_MEMO.clear()
+    parses = []
+    original = B._load_json_bytes
+
+    def counted(raw, canonical):
+        parses.append(raw)
+        return original(raw, canonical)
+
+    monkeypatch.setattr(B, "_load_json_bytes", counted)
+    again = B.bundle_view(data_dir, bid)
+    assert parses == []
+    assert again == first
+
+    # 바뀐 문서만 다시 계산하고, 저장본도 갱신한다
+    path = B.bundle_dir(data_dir, bid) / "golden" / "b.json"
+    path.write_bytes(b"{}  ")
+    time.sleep(0.03)
+    fixed = B.bundle_view(data_dir, bid)
+    assert parses == [b"{}  "]
+    b_errors = {d["id"]: d["errors"] for d in fixed["docs"]}["b"]
+    assert b_errors and "parse error" not in b_errors[0]  # 형식 오류 → 스키마 오류로 바뀐 결과가 반영된다
+    B._MEMO.clear()
+    B._SUM_MEMO.clear()
+    parses.clear()
+    assert B.bundle_view(data_dir, bid) == fixed
+    assert parses == []
+
+    # 코드 버전이 바뀌면 저장본을 쓰지 않는다
+    B._SUM_MEMO.clear()
+    monkeypatch.setattr(B, "_SUMMARY_CODE_VERSION", "changed")
+    B.bundle_view(data_dir, bid)
+    assert sorted(parses) == sorted([b"{} ", b"{}  "])
+
+    B.delete_bundle(data_dir, bid)
+    assert DB.get_doc_summaries(data_dir, bid, ["a", "b"]) == {}

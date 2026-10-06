@@ -325,6 +325,17 @@ def initialize() -> None:
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS doc_summaries (
+                namespace TEXT NOT NULL,
+                bundle_id TEXT NOT NULL,
+                doc_id TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                summary JSONB NOT NULL,
+                PRIMARY KEY (namespace, bundle_id, doc_id),
+                FOREIGN KEY (namespace, bundle_id) REFERENCES bundles(namespace, bundle_id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS golden_history (
                 namespace TEXT NOT NULL,
                 bundle_id TEXT NOT NULL,
@@ -463,6 +474,36 @@ def save_bundle_summaries(data_dir: Path, summaries: dict[str, dict]) -> None:
                 fingerprint=EXCLUDED.fingerprint, counts=EXCLUDED.counts
         """, [(ns, bid, value["fingerprint"], psycopg.types.json.Jsonb(value["counts"]), ns, bid)
               for bid, value in summaries.items()])
+
+
+def get_doc_summaries(data_dir: Path, bundle_id: str, doc_ids: list[str]) -> dict[str, tuple[str, dict]]:
+    """문서 요약 저장본. 원본 파일에서 다시 만들 수 있는 캐시다."""
+    if not doc_ids:
+        return {}
+    with connection() as conn:
+        rows = conn.execute("""
+            SELECT doc_id, fingerprint, summary FROM doc_summaries
+            WHERE namespace=%s AND bundle_id=%s AND doc_id = ANY(%s::text[])
+        """, (namespace(data_dir), bundle_id, doc_ids)).fetchall()
+    return {doc_id: (fingerprint, summary) for doc_id, fingerprint, summary in rows}
+
+
+def save_doc_summaries(data_dir: Path, bundle_id: str, summaries: dict[str, tuple[str, dict]]) -> None:
+    if not summaries:
+        return
+    psycopg = _psycopg()
+    ns = namespace(data_dir)
+    with connection() as conn:
+        conn.cursor().executemany("""
+            INSERT INTO doc_summaries(namespace,bundle_id,doc_id,fingerprint,summary)
+            SELECT %s,%s,%s,%s,%s
+            WHERE EXISTS (
+                SELECT 1 FROM bundles WHERE namespace=%s AND bundle_id=%s
+            )
+            ON CONFLICT(namespace,bundle_id,doc_id) DO UPDATE SET
+                fingerprint=EXCLUDED.fingerprint, summary=EXCLUDED.summary
+        """, [(ns, bundle_id, doc_id, fp, psycopg.types.json.Jsonb(summary), ns, bundle_id)
+              for doc_id, (fp, summary) in summaries.items()])
 
 
 def write_bundle_state(bdir: Path, state: dict) -> None:

@@ -240,3 +240,5 @@ status: active
 - [2026-10-02-aws-integrated-deploy-1002j.md](2026-10-02-aws-integrated-deploy-1002j.md): 주간 요약의 관련 근거 동기화.
 
 - [2026-10-05-clinical-opinion-field.md](2026-10-05-clinical-opinion-field.md): 진단서4종 진료소견 추가 기록 동기화.
+
+- Creation: `2026-10-06-bundle-view-cache.md` — 번들 화면 문서 요약 PostgreSQL 저장, `_memo` LRU 전환, 3,500건 규모 실측·배포 데이터 보존 기록.
